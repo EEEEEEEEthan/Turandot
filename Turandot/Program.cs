@@ -4,7 +4,6 @@ using Turandot;
 var apiKeyPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
     ".apikey");
-var llm = new LLM();
 while (true)
 {
     var (endpoint, apiKey, modelId) = await ReadOrPromptCredentialsAsync(apiKeyPath);
@@ -23,7 +22,7 @@ while (true)
             new ChatMessageContent(AuthorRole.System, "You must call the Ping tool once and reply with its result only."),
             new ChatMessageContent(AuthorRole.User, "Test tool calling.")
         };
-        var reply = await llm.SendAsync(
+        var reply = await LLM.SendAsync(
             endpoint,
             apiKey,
             modelId,

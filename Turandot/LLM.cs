@@ -5,7 +5,7 @@ using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using OpenAI;
 namespace Turandot;
-public sealed class LLM
+public static class LLM
 {
     // ReSharper disable once ClassNeverInstantiated.Global
     public sealed record ToolSpec(
@@ -86,7 +86,7 @@ public sealed class LLM
                 return trimmed[..^suffix.Length];
         return trimmed;
     }
-    public async IAsyncEnumerable<string> SendStreamingAsync(
+    public static async IAsyncEnumerable<string> SendStreamingAsync(
         string endpoint,
         string apiKey,
         string modelId,
@@ -111,7 +111,7 @@ public sealed class LLM
             if (!string.IsNullOrEmpty(chunk.Content))
                 yield return chunk.Content;
     }
-    public async Task<string> SendAsync(
+    public static async Task<string> SendAsync(
         string endpoint,
         string apiKey,
         string modelId,
