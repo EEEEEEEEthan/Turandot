@@ -13,22 +13,35 @@ while (true)
 
     try
     {
-        var messages = new[]
+        var tools = new[]
         {
-            new ChatMessageContent(AuthorRole.User, "hi there")
+            new LLM.ToolSpec(
+                "Ping",
+                "Return Pong to verify tool calls.",
+                [],
+                (_, _) => Task.FromResult("Pong"))
         };
 
-        _ = await llm.SendAsync(
+        var messages = new[]
+        {
+            new ChatMessageContent(AuthorRole.System, "You must call the Ping tool once and reply with its result only."),
+            new ChatMessageContent(AuthorRole.User, "Test tool calling.")
+        };
+
+        var reply = await llm.SendAsync(
             endpoint,
             apiKey,
             modelId,
             messages,
-            null,
+            tools,
             0.0f,
             CancellationToken.None);
 
-        Console.WriteLine("Connection OK.");
-        break;
+        if (reply.Contains("Pong", StringComparison.OrdinalIgnoreCase)) break;
+
+        Console.WriteLine($"Tool call failed. Response: {reply}");
+        Console.WriteLine("Please re-enter URL and API key.");
+        await PromptAndSaveAsync(apiKeyPath);
     }
     catch (Exception ex)
     {
