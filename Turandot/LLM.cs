@@ -1,0 +1,5 @@
+﻿namespace Turandot;
+
+class LLM
+{
+}
