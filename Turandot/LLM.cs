@@ -136,7 +136,7 @@ public static class LLM
         return result.Content ?? string.Empty;
     }
 
-    public static async Task EnsureApiKey(string path)
+    public static async Task<(string endpoint, string apiKey, string modelId)> EnsureApiKey(string path)
     {
         while (true)
         {
@@ -164,7 +164,8 @@ public static class LLM
                     tools,
                     0.0f,
                     CancellationToken.None);
-                if (reply.Contains("Pong", StringComparison.OrdinalIgnoreCase)) break;
+                if (reply.Contains("Pong", StringComparison.OrdinalIgnoreCase))
+                    return (endpoint, apiKey, modelId);
                 Console.WriteLine($"Tool call failed. Response: {reply}");
                 Console.WriteLine("Please re-enter URL and API key.");
                 await PromptAndSaveAsync(path);
@@ -177,6 +178,7 @@ public static class LLM
             }
         }
     }
+
 
     private static async Task<(string endpoint, string apiKey, string modelId)> ReadOrPromptCredentialsAsync(string path)
     {
