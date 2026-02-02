@@ -5,7 +5,7 @@ Console.WriteLine("正在验证api key...");
 var apiKeyPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
     ".apikey");
-var (endpoint, apiKey, modelId) = await LLM.EnsureApiKey(apiKeyPath);
+var credentials = await LLM.EnsureApiKey(apiKeyPath);
 Console.WriteLine("*游戏开始了*");
 var messages = new[]
 {
@@ -22,12 +22,7 @@ var messages = new[]
     ),
     new ChatMessageContent(AuthorRole.User, "请开始。")
 };
-await foreach (var chunk in LLM.SendStreamingAsync(
-                   endpoint,
-                   apiKey,
-                   modelId,
-                   messages,
-                   temperature: 0.6f))
+await foreach (var chunk in LLM.SendStreamingAsync(credentials, messages, temperature: 0.6f))
     Console.Write(chunk);
 Console.WriteLine();
 Console.WriteLine("Press any key to exit.");

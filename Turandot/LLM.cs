@@ -20,6 +20,96 @@ public static class LLM
         string Description,
         Type Type,
         bool IsRequired);
+    public static async IAsyncEnumerable<string> SendStreamingAsync(
+        (string endpoint, string apiKey, string modelId) credentials,
+        IEnumerable<ChatMessageContent> messages,
+        IEnumerable<ToolSpec>? tools = null,
+        float temperature = 0.7f,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var (endpoint, apiKey, modelId) = credentials;
+        var kernel = BuildKernel(endpoint, apiKey, modelId, tools);
+        var chat = kernel.GetRequiredService<IChatCompletionService>();
+        var history = new ChatHistory(messages);
+        var settings = new OpenAIPromptExecutionSettings
+        {
+            Temperature = temperature
+        };
+        if (tools is not null) settings.ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions;
+        await foreach (var chunk in chat.GetStreamingChatMessageContentsAsync(
+                           history,
+                           settings,
+                           kernel,
+                           cancellationToken))
+            if (!string.IsNullOrEmpty(chunk.Content))
+                yield return chunk.Content;
+    }
+    public static async Task<string> SendAsync(
+        string endpoint,
+        string apiKey,
+        string modelId,
+        IEnumerable<ChatMessageContent> messages,
+        IEnumerable<ToolSpec>? tools = null,
+        float temperature = 0.7f,
+        CancellationToken cancellationToken = default)
+    {
+        var kernel = BuildKernel(endpoint, apiKey, modelId, tools);
+        var chat = kernel.GetRequiredService<IChatCompletionService>();
+        var history = new ChatHistory(messages);
+        var settings = new OpenAIPromptExecutionSettings
+        {
+            Temperature = temperature
+        };
+        if (tools is not null) settings.ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions;
+        var result = await chat.GetChatMessageContentAsync(
+            history,
+            settings,
+            kernel,
+            cancellationToken);
+        return result.Content ?? string.Empty;
+    }
+    public static async Task<(string endpoint, string apiKey, string modelId)> EnsureApiKey(string path)
+    {
+        while (true)
+        {
+            var (endpoint, apiKey, modelId) = await ReadOrPromptCredentialsAsync(path);
+            try
+            {
+                var tools = new[]
+                {
+                    new ToolSpec(
+                        "Ping",
+                        "Return Pong to verify tool calls.",
+                        [],
+                        (_, _) => Task.FromResult("Pong"))
+                };
+                var messages = new[]
+                {
+                    new ChatMessageContent(AuthorRole.System, "You must call the Ping tool once and reply with its result only."),
+                    new ChatMessageContent(AuthorRole.User, "Test tool calling.")
+                };
+                var reply = await SendAsync(
+                    endpoint,
+                    apiKey,
+                    modelId,
+                    messages,
+                    tools,
+                    0.0f,
+                    CancellationToken.None);
+                if (reply.Contains("Pong", StringComparison.OrdinalIgnoreCase))
+                    return (endpoint, apiKey, modelId);
+                Console.WriteLine($"Tool call failed. Response: {reply}");
+                Console.WriteLine("Please re-enter URL and API key.");
+                await PromptAndSaveAsync(path);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Connection failed: {ex.Message}");
+                Console.WriteLine("Please re-enter URL and API key.");
+                await PromptAndSaveAsync(path);
+            }
+        }
+    }
     private static Kernel BuildKernel(
         string endpoint,
         string apiKey,
@@ -86,100 +176,6 @@ public static class LLM
                 return trimmed[..^suffix.Length];
         return trimmed;
     }
-    public static async IAsyncEnumerable<string> SendStreamingAsync(
-        string endpoint,
-        string apiKey,
-        string modelId,
-        IEnumerable<ChatMessageContent> messages,
-        IEnumerable<ToolSpec>? tools = null,
-        float temperature = 0.7f,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var kernel = BuildKernel(endpoint, apiKey, modelId, tools);
-        var chat = kernel.GetRequiredService<IChatCompletionService>();
-        var history = new ChatHistory(messages);
-        var settings = new OpenAIPromptExecutionSettings
-        {
-            Temperature = temperature
-        };
-        if (tools is not null) settings.ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions;
-        await foreach (var chunk in chat.GetStreamingChatMessageContentsAsync(
-                           history,
-                           settings,
-                           kernel,
-                           cancellationToken))
-            if (!string.IsNullOrEmpty(chunk.Content))
-                yield return chunk.Content;
-    }
-    public static async Task<string> SendAsync(
-        string endpoint,
-        string apiKey,
-        string modelId,
-        IEnumerable<ChatMessageContent> messages,
-        IEnumerable<ToolSpec>? tools = null,
-        float temperature = 0.7f,
-        CancellationToken cancellationToken = default)
-    {
-        var kernel = BuildKernel(endpoint, apiKey, modelId, tools);
-        var chat = kernel.GetRequiredService<IChatCompletionService>();
-        var history = new ChatHistory(messages);
-        var settings = new OpenAIPromptExecutionSettings
-        {
-            Temperature = temperature
-        };
-        if (tools is not null) settings.ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions;
-        var result = await chat.GetChatMessageContentAsync(
-            history,
-            settings,
-            kernel,
-            cancellationToken);
-        return result.Content ?? string.Empty;
-    }
-
-    public static async Task<(string endpoint, string apiKey, string modelId)> EnsureApiKey(string path)
-    {
-        while (true)
-        {
-            var (endpoint, apiKey, modelId) = await ReadOrPromptCredentialsAsync(path);
-            try
-            {
-                var tools = new[]
-                {
-                    new ToolSpec(
-                        "Ping",
-                        "Return Pong to verify tool calls.",
-                        [],
-                        (_, _) => Task.FromResult("Pong"))
-                };
-                var messages = new[]
-                {
-                    new ChatMessageContent(AuthorRole.System, "You must call the Ping tool once and reply with its result only."),
-                    new ChatMessageContent(AuthorRole.User, "Test tool calling.")
-                };
-                var reply = await SendAsync(
-                    endpoint,
-                    apiKey,
-                    modelId,
-                    messages,
-                    tools,
-                    0.0f,
-                    CancellationToken.None);
-                if (reply.Contains("Pong", StringComparison.OrdinalIgnoreCase))
-                    return (endpoint, apiKey, modelId);
-                Console.WriteLine($"Tool call failed. Response: {reply}");
-                Console.WriteLine("Please re-enter URL and API key.");
-                await PromptAndSaveAsync(path);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Connection failed: {ex.Message}");
-                Console.WriteLine("Please re-enter URL and API key.");
-                await PromptAndSaveAsync(path);
-            }
-        }
-    }
-
-
     private static async Task<(string endpoint, string apiKey, string modelId)> ReadOrPromptCredentialsAsync(string path)
     {
         if (!File.Exists(path)) return await PromptAndSaveAsync(path);
@@ -191,7 +187,6 @@ public static class LLM
             return (lines[0].Trim(), lines[1].Trim(), lines[2].Trim());
         return await PromptAndSaveAsync(path);
     }
-
     private static async Task<(string endpoint, string apiKey, string modelId)> PromptAndSaveAsync(string path)
     {
         Console.Write("URL: ");
