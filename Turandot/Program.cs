@@ -16,23 +16,13 @@ sealed class Game
 	{
 		public readonly string name = name;
 	}
-	abstract class Role
+	abstract class Role(Game game, Player player)
 	{
-		public readonly Player player;
+		public readonly Player player = player;
 		public bool dead;
-		readonly List<ChatMessageContent> context;
-		readonly Game game;
+		readonly List<ChatMessageContent> context = [];
 		public string Name => player.name;
 		protected abstract string RoleText { get; }
-		protected Role(Game game, Player player)
-		{
-			this.game = game;
-			this.player = player;
-			context =
-			[
-				new(AuthorRole.System, $"你是{Name},你们在玩狼人。你的身份是{RoleText}"),
-			];
-		}
 		public void AppendMessage(ChatMessageContent content) { context.Add(content); }
 		public void Say(string message)
 		{
@@ -50,7 +40,7 @@ sealed class Game
 		}
 		public Task<string> Prompt(string prompt)
 		{
-			prompt = $"你是{Name},请发言:{prompt}";
+			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
 			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化)"),};
 			return LLM.SendAsync(game.credentials, copied);
