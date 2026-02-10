@@ -10,7 +10,7 @@ var game = new Game();
 await game.PlayAsync(credentials);
 Console.WriteLine("按任意键退出");
 Console.ReadKey(true);
-class Game
+sealed class Game
 {
 	class Role(string name)
 	{
@@ -40,12 +40,13 @@ class Game
 		BroadcastMessage("天黑请闭眼");
 		BroadcastMessage("狼人请睁眼");
 		BroadcastMessage("狼人请杀人");
-		_ = await Kill(credentials);
+		var role = await Kill(credentials);
+		BroadcastMessage($"天亮了，{role.name}被杀死了。");
 	}
 	async Task<Role> Kill((string endpoint, string apiKey, string modelId) credentials)
 	{
 		var wolves = roles.OfType<WolfRole>().ToList();
-		var villagers = roles.OfType<PeasantRole>().Select(static r => r.name).ToList();
+		var villagers = roles.Select(static r => r.name).ToList();
 		var villagerList = string.Join("，", villagers);
 		Dictionary<WolfRole, string>? previousRoundChoices = null;
 		while(true)
@@ -71,6 +72,10 @@ class Game
 					(payload, _) =>
 					{
 						var target = (string)payload["目标玩家"]!;
+						var color = Console.ForegroundColor;
+						Console.ForegroundColor = ConsoleColor.DarkGray;
+						Console.WriteLine($"{wolf.name}选择了{target}");
+						Console.ForegroundColor = color;
 						choices[wolf] = target;
 						return Task.FromResult("已记录你的选择");
 					});
@@ -100,7 +105,6 @@ class Game
 			if(choices.Values.Distinct().Count() == 1)
 			{
 				var targetName = choices.Values.First();
-				BroadcastMessage("狼人一致选择击杀 " + targetName, static r => r is WolfRole);
 				return roles.First(r => r.name == targetName);
 			}
 			previousRoundChoices = new(choices);
