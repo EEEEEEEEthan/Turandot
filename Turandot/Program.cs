@@ -18,12 +18,12 @@ sealed class Game
 	}
 	abstract class Role
 	{
-		protected abstract string RoleText { get; }
 		public readonly Player player;
 		public bool dead;
 		readonly List<ChatMessageContent> context;
 		readonly Game game;
 		public string Name => player.name;
+		protected abstract string RoleText { get; }
 		protected Role(Game game, Player player)
 		{
 			this.game = game;
@@ -81,20 +81,17 @@ sealed class Game
 			return target;
 		}
 	}
-	sealed class HolderRole : Role
+	sealed class HolderRole(Game game, Player player): Role(game, player)
 	{
 		protected override string RoleText => "主持人";
-		public HolderRole(Game game, Player player) : base(game, player) { }
 	}
-	sealed class WolfRole : Role
+	sealed class WolfRole(Game game, Player player): Role(game, player)
 	{
 		protected override string RoleText => "狼人";
-		public WolfRole(Game game, Player player) : base(game, player) { }
 	}
-	sealed class VillagerRole : Role
+	sealed class VillagerRole(Game game, Player player): Role(game, player)
 	{
 		protected override string RoleText => "村民";
-		public VillagerRole(Game game, Player player) : base(game, player) { }
 	}
 	readonly List<Role> roles = [];
 	readonly HolderRole holder;
@@ -102,7 +99,7 @@ sealed class Game
 	public Game((string endpoint, string apiKey, string modelId) creds)
 	{
 		credentials = creds;
-		holder = new HolderRole(this, new Player("daniel"));
+		holder = new(this, new("daniel"));
 	}
 	public async Task PlayAsync()
 	{
@@ -164,8 +161,8 @@ sealed class Game
 					executed.Say(lastWords);
 				}
 			}
-			var wolfCount = roles.Count(static r => r is WolfRole { dead: false });
-			var villagerCount = roles.Count(static r => r is VillagerRole { dead: false });
+			var wolfCount = roles.Count(static r => r is WolfRole {dead: false,});
+			var villagerCount = roles.Count(static r => r is VillagerRole {dead: false,});
 			if(wolfCount >= villagerCount)
 			{
 				holder.Say("游戏结束, 狼人胜利");
