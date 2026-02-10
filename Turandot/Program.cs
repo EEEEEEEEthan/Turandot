@@ -105,20 +105,32 @@ sealed class Game
 	}
 	public async Task PlayAsync()
 	{
-		roles.Add(new(this, RoleType.Wolf, new("ethan")));
-		roles.Add(new(this, RoleType.Wolf, new("dove")));
-		roles.Add(new(this, RoleType.Villager, new("alice")));
-		roles.Add(new(this, RoleType.Villager, new("bob")));
-		roles.Add(new(this, RoleType.Villager, new("carol")));
-		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.player.name}");
-		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.player.name))}");
+		var random = new Random((int)DateTime.Now.Ticks);
+		var playerNames = new[] {"ethan", "dove", "frank", "alice", "bob", "carol", "grace", "heidy", "ivan",};
+		var players = playerNames.Select(static name => new Player(name)).ToList();
+		for(var i = players.Count; i-- > 0;)
+		{
+			var j = random.Next(0, i + 1);
+			(players[i], players[j]) = (players[j], players[i]);
+		}
+		for(var i = 0; i < 3; ++i)
+			roles.Add(new(this, RoleType.Wolf, players[i]));
+		for(var i = 3; i < players.Count; ++i)
+			roles.Add(new(this, RoleType.Villager, players[i]));
+		for(var i = roles.Count; i-- > 0;)
+		{
+			var j = random.Next(0, i + 1);
+			(roles[i], roles[j]) = (roles[j], roles[i]);
+		}
+		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
+		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
 		holder.Say($"其中有{roles.Count(static r => r.roleType == RoleType.Wolf)}个狼人,其他都是村民");
 		holder.Say("天黑请闭眼");
 		foreach(var role in roles) role.Notify("你闭上了眼");
 		holder.Say("狼人请睁眼互相确认身份");
 		foreach(var role in roles.Where(static r => r.roleType == RoleType.Wolf))
 		{
-			var wolves = string.Join(", ", roles.Where(r => r != role && r.roleType == RoleType.Wolf).Select(static r => r.player.name));
+			var wolves = string.Join(", ", roles.Where(r => r != role && r.roleType == RoleType.Wolf).Select(static r => r.Name));
 			role.Notify($"你睁开眼,发现{wolves}和你一样也是狼人");
 		}
 		holder.Say("狼人请闭眼");
@@ -165,7 +177,6 @@ sealed class Game
 			}
 			holder.Say("游戏继续");
 		}
-		return;
 		async Task<Role?> voteExecute()
 		{
 			var alive = roles.Where(static r => !r.dead).ToList();
