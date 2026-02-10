@@ -33,6 +33,7 @@ sealed class Game
 				new(AuthorRole.System, $"你是{Name},你们在玩狼人。你的身份是{RoleText}"),
 			];
 		}
+		public void AppendMessage(ChatMessageContent content) { context.Add(content); }
 		public void Say(string message)
 		{
 			message = $"[{Name}]{message}";
@@ -84,6 +85,12 @@ sealed class Game
 	sealed class HolderRole(Game game, Player player): Role(game, player)
 	{
 		protected override string RoleText => "主持人";
+		public void Whisper(Role target, string message)
+		{
+			message = $"[{Name}](悄悄对{target.Name}说){message}";
+			target.AppendMessage(new(AuthorRole.System, message));
+			Console.WriteLine(message);
+		}
 	}
 	sealed class WolfRole(Game game, Player player): Role(game, player)
 	{
