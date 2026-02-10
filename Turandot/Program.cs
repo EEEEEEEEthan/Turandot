@@ -45,8 +45,12 @@ sealed class Game
 		Console.ForegroundColor = previousColor;
 	}
 	readonly List<Role> roles = [];
-	public async Task PlayAsync((string endpoint, string apiKey, string modelId) credentials)
+	readonly HashSet<string> dead = [];
+	(string endpoint, string apiKey, string modelId) credentials;
+	IEnumerable<Role> Alive => roles.Where(r => !dead.Contains(r.name));
+	public async Task PlayAsync((string endpoint, string apiKey, string modelId) creds)
 	{
+		credentials = creds;
 		roles.Add(new WolfRole("ethan"));
 		roles.Add(new WolfRole("dove"));
 		roles.Add(new PeasantRole("alice"));
@@ -60,10 +64,65 @@ sealed class Game
 			if(role is WolfRole)
 				BroadcastMessage($"{role.name}是狼人", static ro => ro is WolfRole);
 		BroadcastMessage("狼人请杀人");
-		var killed = await Kill(credentials);
-		BroadcastMessage($"天亮了，{killed.name}被杀死了。");
+		var killed = await Kill();
+		dead.Add(killed.name);
+		BroadcastMessage($"天亮了，{killed.name}被杀死了。"); // 死于非命，无遗言
+		var executed = await VoteExecute();
+		dead.Add(executed.name);
+		BroadcastMessage($"投票结果：{executed.name}被处决。");
+		var lastWordsMessages = executed
+			.context
+			.Concat([new(AuthorRole.User, "你被投票处决了，请简短发表遗言（一两句话）。"),])
+			.ToList();
+		var lastWords = await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, lastWordsMessages);
+		BroadcastMessage($"{executed.name}的遗言：{lastWords}");
 	}
-	async Task<Role> Kill((string endpoint, string apiKey, string modelId) credentials)
+	async Task<Role> VoteExecute()
+	{
+		var alive = Alive.ToList();
+		var names = alive.Select(static r => r.name).ToList();
+		var nameList = string.Join("，", names);
+		Dictionary<Role, string> choices = [];
+		foreach(var r in alive)
+		{
+			var role = r;
+			const string toolName = "vote";
+			var tool = new LLM.ToolSpec(
+				toolName,
+				"投票处决一名玩家",
+				[new("目标", "要投票处决的玩家名字", typeof(string), true),],
+				(payload, _) =>
+				{
+					var target = (string)payload["目标"]!;
+					PrintLineColored(ConsoleColor.DarkGray, $"{role.name}投票给{target}");
+					choices[role] = target;
+					return Task.FromResult("已记录");
+				});
+			var messages = role
+				.context
+				.Concat([new(AuthorRole.User, $"白天讨论结束，请投票处决一人。可选：{nameList}。请调用{toolName}工具。"),])
+				.ToList();
+			while(true)
+			{
+				var reply = await LLM.SendAsync(
+					credentials.endpoint,
+					credentials.apiKey,
+					credentials.modelId,
+					messages,
+					[tool,],
+					0.6f);
+				if(choices.ContainsKey(role)) break;
+				messages.Add(new(AuthorRole.Assistant, reply));
+				messages.Add(new(AuthorRole.User, "请调用vote工具，参数为要处决的玩家名字。"));
+			}
+		}
+		var grouped = choices.Values.GroupBy(static x => x).OrderByDescending(static g => g.Count()).ToList();
+		var maxCount = grouped.First().Count();
+		var tied = grouped.Where(g => g.Count() == maxCount).Select(static g => g.Key).ToList();
+		var chosen = tied.Count == 1? tied[0] : tied[new Random().Next(tied.Count)];
+		return roles.First(r => r.name == chosen);
+	}
+	async Task<Role> Kill()
 	{
 		var wolves = roles.OfType<WolfRole>().ToList();
 		var villagers = roles.Select(static r => r.name).ToList();
