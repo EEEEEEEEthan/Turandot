@@ -56,34 +56,39 @@ sealed class Game
 		roles.Add(new PeasantRole("alice"));
 		roles.Add(new PeasantRole("bob"));
 		roles.Add(new PeasantRole("carol"));
-		BroadcastMessage("游戏开始了,在场的玩家有ethan,dove,alice,bob,carol。其中2个狼人,3个村民");
-		BroadcastMessage("天黑请闭眼");
-		BroadcastMessage("狼人请睁眼");
-		BroadcastMessage("狼人请确认身份");
+		BroadcastMessage("[系统]游戏开始了,在场的玩家有ethan,dove,alice,bob,carol。其中2个狼人,3个村民");
+		BroadcastMessage("[系统]天黑请闭眼");
+		BroadcastMessage("[系统]狼人请睁眼");
+		BroadcastMessage("[系统]狼人请确认身份");
 		foreach(var role in roles)
 			if(role is WolfRole)
-				BroadcastMessage($"{role.name}是狼人", static ro => ro is WolfRole);
-		BroadcastMessage("狼人请杀人");
+				BroadcastMessage($"[系统]{role.name}是狼人", static ro => ro is WolfRole);
+		BroadcastMessage("[系统]天亮了.请大家自我介绍");
+		await SpeakRound("请自我介绍", Alive.OrderBy(static _ => Random.Shared.Next()).ToList());
+		BroadcastMessage("[系统]天黑请闭眼");
+		BroadcastMessage("[系统]狼人请杀人");
 		var killed = await Kill();
 		dead.Add(killed.name);
-		BroadcastMessage($"天亮了，{killed.name}被杀死了。"); // 死于非命，无遗言
-		var executed = await VoteExecute();
+		BroadcastMessage($"[系统]天亮了,{killed.name}被杀死了.从死者下家开始发言.");
+		var orderFromDeadNext = OrderFromNextTo(roles.FindIndex(r => r.name == killed.name));
+		await SpeakRound("投票前的讨论.每个人只有一次发言机会", orderFromDeadNext);
+		BroadcastMessage($"[系统]讨论完毕,现在开始投票.从死者下家开始投票");
+		var executed = await VoteExecute(orderFromDeadNext);
 		dead.Add(executed.name);
-		BroadcastMessage($"投票结果：{executed.name}被处决。");
+		BroadcastMessage($"[系统]投票结果：{executed.name}被处决。");
 		var lastWordsMessages = executed
 			.context
-			.Concat([new(AuthorRole.User, "你被投票处决了，请简短发表遗言（一两句话）。"),])
+			.Concat([new(AuthorRole.User, "你被投票处决了，请发表遗言"),])
 			.ToList();
 		var lastWords = await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, lastWordsMessages);
-		BroadcastMessage($"{executed.name}的遗言：{lastWords}");
+		BroadcastMessage($"[{executed.name}]:{lastWords}");
 	}
-	async Task<Role> VoteExecute()
+	async Task<Role> VoteExecute(List<Role> order)
 	{
-		var alive = Alive.ToList();
-		var names = alive.Select(static r => r.name).ToList();
+		var names = order.Select(static r => r.name).ToList();
 		var nameList = string.Join("，", names);
 		Dictionary<Role, string> choices = [];
-		foreach(var r in alive)
+		foreach(var r in order)
 		{
 			var role = r;
 			const string toolName = "vote";
@@ -124,9 +129,9 @@ sealed class Game
 	}
 	async Task<Role> Kill()
 	{
-		var wolves = roles.OfType<WolfRole>().ToList();
-		var villagers = roles.Select(static r => r.name).ToList();
-		var villagerList = string.Join("，", villagers);
+		var wolves = roles.OfType<WolfRole>().Where(w => !dead.Contains(w.name)).ToList();
+		var aliveNames = Alive.Select(r => r.name).ToList();
+		var targetList = string.Join("，", aliveNames);
 		Dictionary<WolfRole, string>? previousRoundChoices = null;
 		while(true)
 		{
@@ -146,7 +151,7 @@ sealed class Game
 				const string toolName = "select_target";
 				var tool = new LLM.ToolSpec(
 					toolName,
-					"选择今晚要击杀的玩家，调用后狼人们会得知当前选择。",
+					"选择今晚要击杀的玩家，调用后狼人们会得知当前选择。只能选存活玩家。",
 					[new("目标玩家", "要击杀的玩家名字", typeof(string), true),],
 					(payload, _) =>
 					{
@@ -161,7 +166,7 @@ sealed class Game
 					[
 						new(
 							AuthorRole.User,
-							$"请选择今晚要击杀的目标玩家。可选：{villagerList}。{otherLastRound}\n请调用选择击{toolName}工具，参数为你要击杀的玩家名字。"),
+							$"请选择今晚要击杀的目标玩家。可选（仅存活）：{targetList}。{otherLastRound}\n请调用选择击{toolName}工具，参数为你要击杀的玩家名字。"),
 					])
 					.ToList();
 				while(true)
@@ -185,6 +190,32 @@ sealed class Game
 			}
 			previousRoundChoices = new(choices);
 			BroadcastMessage("狼人目标不一致，请重新选择", static r => r is WolfRole);
+		}
+	}
+	/// <summary>从指定玩家下家开始的存活顺序（环状）</summary>
+	List<Role> OrderFromNextTo(int index)
+	{
+		var alive = Alive.ToList();
+		if(index < 0) return alive;
+		var ordered = new List<Role>();
+		for(var i = 1; i <= roles.Count; i++)
+		{
+			var r = roles[(index + i) % roles.Count];
+			if(!dead.Contains(r.name)) ordered.Add(r);
+		}
+		return ordered;
+	}
+	async Task SpeakRound(string prompt, List<Role> order)
+	{
+		foreach(var role in order)
+		{
+			var messages = role
+				.context
+				.Concat([new(AuthorRole.User, prompt),])
+				.ToList();
+			var content = await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, messages);
+			var msg = $"[{role.name}]{content}";
+			BroadcastMessage(msg);
 		}
 	}
 	void BroadcastMessage(string message, Func<Role, bool>? filter = null)
