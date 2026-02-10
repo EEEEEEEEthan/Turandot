@@ -40,6 +40,10 @@ class Game
 		BroadcastMessage("天黑请闭眼");
 		BroadcastMessage("狼人请睁眼");
 		BroadcastMessage("狼人请杀人");
+		_ = await Kill(credentials);
+	}
+	async Task<Role> Kill((string endpoint, string apiKey, string modelId) credentials)
+	{
 		var wolves = roles.OfType<WolfRole>().ToList();
 		var villagers = roles.OfType<PeasantRole>().Select(static r => r.name).ToList();
 		var villagerList = string.Join("，", villagers);
@@ -52,32 +56,25 @@ class Game
 				var tool = new LLM.ToolSpec(
 					"select_target",
 					"选择今晚要击杀的玩家，调用后狼人们会得知当前选择。",
-					[new("目标玩家", "要击杀的玩家名字", typeof(string), true),],
+					[new LLM.ParameterSpec("目标玩家", "要击杀的玩家名字", typeof(string), true)],
 					(payload, _) =>
 					{
 						var target = (string)payload["目标玩家"]!;
 						choices[wolf] = target;
-						BroadcastMessage($"当前有人选择击杀：{target}", static r => r is WolfRole);
+						BroadcastMessage($"[仅狼人]{wolf.name}选择击杀：{target}", static r => r is WolfRole);
 						return Task.FromResult("已记录你的选择");
 					});
-				var messages = wolf.context.Concat(
-				[
-					new(
-						AuthorRole.User,
+				var messages = wolf.context.Concat([
+					new(AuthorRole.User,
 						$"请选择今晚要击杀的目标玩家。可选：{villagerList}。请调用选择击杀目标工具，参数为你要击杀的玩家名字。"),
 				]);
-				await LLM.SendAsync(
-					credentials.endpoint,
-					credentials.apiKey,
-					credentials.modelId,
-					messages,
-					[tool,],
-					0.6f);
+				await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, messages, [tool], 0.6f);
 			}
 			if(choices.Values.Distinct().Count() == 1)
 			{
-				BroadcastMessage("狼人一致选择击杀 " + choices.Values.First(), static r => r is WolfRole);
-				break;
+				var targetName = choices.Values.First();
+				BroadcastMessage("狼人一致选择击杀 " + targetName, static r => r is WolfRole);
+				return roles.First(r => r.name == targetName);
 			}
 			BroadcastMessage("狼人目标不一致，请重新选择", static r => r is WolfRole);
 		}
