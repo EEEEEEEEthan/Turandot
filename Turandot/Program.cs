@@ -58,7 +58,7 @@ sealed class Game
 		{
 			if(options.Count <= 0) throw new ArgumentException("选项不能为空", nameof(options));
 			var availableOptions = string.Join("，", options.Select(static r => r.Name));
-			prompt = $"你是{Name}({RoleText},你的性格:{player.personalityPrompts}),现在选择目标.{prompt}";
+			prompt = $"你是{Name}({RoleText}),现在选择目标.{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
 			const string toolName = "select_target";
 			Role? target = null;
@@ -66,7 +66,7 @@ sealed class Game
 			{
 				var tool = new LLM.ToolSpec(
 					toolName,
-					"选择一个玩家",
+					$"选择一个玩家(你的性格:{player.personalityPrompts})",
 					[new("target", $"玩家名字,{availableOptions}中的一个", typeof(string), true),],
 					(payload, _) =>
 					{
