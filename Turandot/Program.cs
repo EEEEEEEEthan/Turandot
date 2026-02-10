@@ -6,65 +6,9 @@ var apiKeyPath = Path.Combine(
 	Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
 	".apikey");
 var credentials = await LLM.EnsureApiKey(apiKeyPath);
-Console.WriteLine("*游戏开始了*");
-var history = new List<ChatMessageContent>
-{
-	new(
-		AuthorRole.System,
-		"""
-		你是《图兰朵》的系统。玩家扮演的是流亡的鞑靼王子卡拉夫。请你引导玩家进行游戏。
-		图兰朵是元朝公主。她的姐姐被异族所杀，图兰朵为了报仇，决定杀尽天下所有异族男子。
-		图兰朵设下三个谜题，谁能答出谜题，谁就能娶她为妻。答不出谜题的男子将被斩首。
-		"""),
-};
-{
-	var enumerable = LLM.SendStreamingAsync(
-		credentials,
-		new List<ChatMessageContent>(history)
-		{
-			new(
-				AuthorRole.Assistant,
-				"""
-				现在卡拉夫来到了元大都（故事还没开始）。请你以卡拉夫的第一人称视角介绍卡拉夫。
-				请注意以下几点：
-				1. 200字以内
-				2. 卡拉夫是从西向东流亡的
-				3. 此时不要提及图兰朵，因为他们还不认识
-				4. 不要表现得特意前往元大都
-				"""
-			),
-			new(AuthorRole.User, "请开始。"),
-		},
-		temperature: 0.6f);
-	await foreach(var chunk in enumerable)
-		Console.Write(chunk);
-	Console.WriteLine();
-	Console.ReadKey(true);
-}
-{
-	var enumerable = LLM.SendStreamingAsync(
-		credentials,
-		[
-			new(
-				AuthorRole.Assistant,
-				"""
-				玩家进入了元大都，看到很多人在围观波斯王子被斩首。
-				此时玩家孤身一人。
-				波斯王子是图兰朵的求婚者之一。
-				"""
-			),
-			new(
-				AuthorRole.User,
-				"我进入元大都，看到很多人在围观什么。是波斯王子在被斩首。请你用选项引导我接下来的行动。但是不要偏离图兰朵的剧情。"
-			),
-		],
-		temperature: 0.6f);
-	await foreach(var chunk in enumerable)
-		Console.Write(chunk);
-	Console.ReadKey(true);
-}
-Console.WriteLine();
-Console.WriteLine("Press any key to exit.");
+var game = new Game();
+await game.PlayAsync(credentials);
+Console.WriteLine("按任意键退出");
 Console.ReadKey(true);
 class Game
 {
@@ -85,7 +29,7 @@ class Game
 		public PeasantRole(string name): base(name) { context.Add(new(AuthorRole.System, $"你叫{name},你们在玩狼人,你抽到的角色是村民。")); }
 	}
 	readonly List<Role> roles = [];
-	public Game()
+	public async Task PlayAsync((string endpoint, string apiKey, string modelId) credentials)
 	{
 		roles.Add(new WolfRole("ethan"));
 		roles.Add(new WolfRole("dove"));
@@ -96,10 +40,46 @@ class Game
 		BroadcastMessage("天黑请闭眼");
 		BroadcastMessage("狼人请睁眼");
 		BroadcastMessage("狼人请杀人");
-		foreach(var role in roles)
+		var wolves = roles.OfType<WolfRole>().ToList();
+		var villagers = roles.OfType<PeasantRole>().Select(static r => r.name).ToList();
+		var villagerList = string.Join("，", villagers);
+		while(true)
 		{
-			// 狼人func call
-			
+			var choices = new Dictionary<WolfRole, string>();
+			foreach(var w in wolves)
+			{
+				var wolf = w;
+				var tool = new LLM.ToolSpec(
+					"select_target",
+					"选择今晚要击杀的玩家，调用后狼人们会得知当前选择。",
+					[new("目标玩家", "要击杀的玩家名字", typeof(string), true),],
+					(payload, _) =>
+					{
+						var target = (string)payload["目标玩家"]!;
+						choices[wolf] = target;
+						BroadcastMessage($"当前有人选择击杀：{target}", static r => r is WolfRole);
+						return Task.FromResult("已记录你的选择");
+					});
+				var messages = wolf.context.Concat(
+				[
+					new(
+						AuthorRole.User,
+						$"请选择今晚要击杀的目标玩家。可选：{villagerList}。请调用选择击杀目标工具，参数为你要击杀的玩家名字。"),
+				]);
+				await LLM.SendAsync(
+					credentials.endpoint,
+					credentials.apiKey,
+					credentials.modelId,
+					messages,
+					[tool,],
+					0.6f);
+			}
+			if(choices.Values.Distinct().Count() == 1)
+			{
+				BroadcastMessage("狼人一致选择击杀 " + choices.Values.First(), static r => r is WolfRole);
+				break;
+			}
+			BroadcastMessage("狼人目标不一致，请重新选择", static r => r is WolfRole);
 		}
 	}
 	void BroadcastMessage(string message, Func<Role, bool>? filter = null)
