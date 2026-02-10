@@ -58,7 +58,8 @@ sealed class Game
 		{
 			message = $"[system]{message}";
 			context.Add(new(AuthorRole.System, message));
-			Console.WriteLine(message);
+			using(new ConsoleColorScope(ConsoleColor.DarkGray))
+				Console.WriteLine(message);
 		}
 		public Task<string> Prompt(string prompt)
 		{
@@ -129,7 +130,7 @@ sealed class Game
 		{
 			holder.Say("天亮了,昨晚没有玩家死亡");
 			holder.Say($"昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
-			await discuss(originIndex, $"请发言");
+			await discuss(originIndex, "请发言");
 		}
 		else
 		{
