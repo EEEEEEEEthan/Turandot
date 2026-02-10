@@ -105,11 +105,10 @@ sealed class Game
 	readonly HolderRole holder;
 	readonly List<Player> players;
 	readonly (string endpoint, string apiKey, string modelId) credentials;
-	readonly Config config;
 	public Game((string endpoint, string apiKey, string modelId) creds)
 	{
 		players = new[] {"ethan", "dove", "frank", "alice", "bob", "carol", "grace", "heidy", "ivan",}.Select(static name => new Player(name)).ToList();
-		config = players.Count switch
+		Config config = players.Count switch
 		{
 			4 => new() {wolfCount = 1, seerCount = 1, villagerCount = 2,},
 			5 => new() {wolfCount = 1, seerCount = 1, villagerCount = 3,},
@@ -119,6 +118,7 @@ sealed class Game
 			9 => new() {wolfCount = 3, seerCount = 1, villagerCount = 5,},
 			_ => throw new ArgumentException("不支持的玩家数量", nameof(creds)),
 		};
+		if(config.seerCount > 1) throw new ArgumentException("预言家数量不能大于1", nameof(creds));
 		if(config.Count != players.Count) throw new ArgumentException("角色数量与玩家数量不匹配", nameof(creds));
 		credentials = creds;
 		holder = new(this, new("daniel"));
@@ -136,6 +136,9 @@ sealed class Game
 			var j = random.Next(0, i + 1);
 			(roles[i], roles[j]) = (roles[j], roles[i]);
 		}
+		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
+		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
+		holder.Say($"本局配置: {config.wolfCount}个狼人, {config.seerCount}个预言家, {config.villagerCount}个村民");
 		return;
 		void addWolf()
 		{
@@ -158,9 +161,6 @@ sealed class Game
 	}
 	public async Task PlayAsync()
 	{
-		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
-		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
-		holder.Say($"其中有{roles.Count(static r => r is WolfRole)}个狼人,其他都是村民");
 		holder.Say("天黑请闭眼");
 		foreach(var role in roles) role.Notify("你闭上了眼");
 		holder.Say("狼人请睁眼互相确认身份");
@@ -171,15 +171,16 @@ sealed class Game
 		}
 		holder.Say("狼人请闭眼");
 		foreach(var role in roles.OfType<WolfRole>()) role.Notify("你闭上了眼");
-		holder.Say("天亮了");
+		holder.Say("天亮了.本轮仅确认身份,不杀人.没有任何人死亡");
 		foreach(var role in roles) role.Notify("你睁开了眼");
 		var originIndex = new Random().Next(0, roles.Count);
-		holder.Say($"请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍");
+		holder.Say($"请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
 		await discuss(originIndex, "请发言");
 		while(true)
 		{
 			holder.Say("天黑请闭眼");
-			var killed = await kill();
+			var killed = await wolfTurn();
+			await seerTurn();
 			if(killed is null)
 			{
 				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
@@ -239,7 +240,7 @@ sealed class Game
 				role.Say(result);
 			}
 		}
-		async Task<Role?> kill()
+		async Task<Role?> wolfTurn()
 		{
 			holder.Say("狼人请睁眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
@@ -254,6 +255,8 @@ sealed class Game
 					return target;
 				}
 			}
+			holder.Say("狼人请闭眼");
+			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你闭上了眼");
 			return null;
 			async Task<Role?> vote()
 			{
@@ -269,6 +272,20 @@ sealed class Game
 				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify(message);
 				return null;
 			}
+		}
+		async Task seerTurn()
+		{
+			holder.Say("预言家请睁眼");
+			foreach(var role in roles.OfType<SeerRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
+			var alive = roles.Where(static r => !r.dead).ToList();
+			foreach(var seer in roles.OfType<SeerRole>().Where(static r => !r.dead))
+			{
+				var target = await seer.Select("请选择你要查验的玩家", alive);
+				var isWolf = target is WolfRole;
+				holder.Whisper(seer, $"你查验了{target.Name}，TA是{(isWolf? "狼人" : "好人")}");
+			}
+			foreach(var role in roles.OfType<SeerRole>().Where(static r => !r.dead)) role.Notify("你闭上了眼");
+			holder.Say("预言家请闭眼");
 		}
 	}
 }
