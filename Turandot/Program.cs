@@ -49,9 +49,9 @@ sealed class Game
 		}
 		public Task<string> Prompt(string prompt)
 		{
-			prompt = $"你是{Name}({RoleText},你的性格:{player.personalityPrompts}),请发言:{prompt}";
+			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
-			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人)"),};
+			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人.你的性格:{player.personalityPrompts})"),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
