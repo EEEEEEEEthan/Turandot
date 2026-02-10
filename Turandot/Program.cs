@@ -29,7 +29,7 @@ sealed class Game
 		public bool dead;
 		readonly List<ChatMessageContent> context;
 		readonly Game game;
-		string Name => player.name;
+		public string Name => player.name;
 		public Role(Game game, RoleType roleType, Player player)
 		{
 			this.game = game;
@@ -62,7 +62,7 @@ sealed class Game
 		}
 		public Task<string> Prompt(string prompt)
 		{
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}\n(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`)");
 			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
@@ -98,7 +98,6 @@ sealed class Game
 	{
 		credentials = creds;
 		holder = new(this, RoleType.Holder, new("daniel"));
-		_ = PlayAsync();
 	}
 	public async Task PlayAsync()
 	{
@@ -108,21 +107,77 @@ sealed class Game
 		roles.Add(new(this, RoleType.Villager, new("bob")));
 		roles.Add(new(this, RoleType.Villager, new("carol")));
 		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.player.name}");
+		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.player.name))}");
+		holder.Say($"其中有{roles.Count(static r => r.roleType == RoleType.Wolf)}个狼人,其他都是村民");
 		holder.Say("天黑请闭眼");
-		holder.Say("狼人请睁眼");
+		foreach(var role in roles) role.Notify("你闭上了眼");
+		holder.Say("狼人请睁眼互相确认身份");
 		foreach(var role in roles.Where(static r => r.roleType == RoleType.Wolf))
 		{
-			var wolves = string.Join(", ", roles.Where(r => r != role && r.roleType == RoleType.Wolf));
+			var wolves = string.Join(", ", roles.Where(r => r != role && r.roleType == RoleType.Wolf).Select(static r => r.player.name));
 			role.Notify($"你睁开眼,发现{wolves}和你一样也是狼人");
 		}
 		holder.Say("狼人请闭眼");
+		foreach(var role in roles.Where(static r => r.roleType == RoleType.Wolf)) role.Notify("你闭上了眼");
 		holder.Say("天亮了");
-		var index = new Random().Next(0, roles.Count);
-		holder.Say($"从{roles[index].player.name}开始依次发言");
-		for(var i = 0; i < roles.Count; i++)
+		foreach(var role in roles) role.Notify("你睁开了眼");
+		var originIndex = new Random().Next(0, roles.Count);
+		await discuss(originIndex, "请大家依次自我介绍并发表第一轮讨论");
+		holder.Say("天黑请闭眼");
+		var killed = await kill();
+		if(killed is null)
 		{
-			var role = roles[(index + i) % roles.Count];
-			role.Say(await role.Prompt("请做一个简单的发言"));
+			holder.Say("天亮了,昨晚没有玩家死亡");
+			holder.Say($"昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
+			await discuss(originIndex, $"请发言");
+		}
+		else
+		{
+			killed.dead = true;
+			holder.Say($"天亮了,昨晚{killed.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
+			await discuss(roles.IndexOf(killed) + 1, "请发言");
+		}
+		return;
+		async Task discuss(int firstIndex, string prompt)
+		{
+			for(var i = 0; i < roles.Count; i++)
+			{
+				var role = roles[(firstIndex + i) % roles.Count];
+				if(role.dead) continue;
+				var result = await role.Prompt(prompt);
+				role.Say(result);
+			}
+		}
+		async Task<Role?> kill()
+		{
+			holder.Say("狼人请睁眼");
+			foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,})) role.Notify("你睁开了眼");
+			for(var i = 0; i < roles.Count; i++)
+			{
+				var target = await vote();
+				if(target is null)
+					holder.Say("狼人请统一意见.如果无法达成一致,则本轮无人死亡");
+				else
+				{
+					target.dead = true;
+					return target;
+				}
+			}
+			return null;
+			async Task<Role?> vote()
+			{
+				Dictionary<Role, Role> votes = new();
+				foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,}))
+				{
+					var aliveRoles = roles.Where(static r => !r.dead).ToList();
+					var target = await aliveRoles[0].Select("请选择你要杀死的玩家", aliveRoles.Where(static r => !r.dead).ToList());
+					votes[role] = target;
+				}
+				if(votes.Values.Distinct().Count() == 1) return votes.Values.First();
+				var message = string.Join(", ", votes.Select(static kv => $"{kv.Key.Name}选择了{kv.Value.Name}"));
+				foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,})) role.Notify(message);
+				return null;
+			}
 		}
 	}
 }
