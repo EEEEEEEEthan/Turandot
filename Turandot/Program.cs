@@ -29,7 +29,7 @@ sealed class Game
 		public bool dead;
 		readonly List<ChatMessageContent> context = [];
 		public string Name => player.name;
-		protected abstract string RoleText { get; }
+		public abstract string RoleText { get; }
 		public void AppendMessage(ChatMessageContent content) { context.Add(content); }
 		public void Say(string message)
 		{
@@ -81,7 +81,7 @@ sealed class Game
 	}
 	sealed class HolderRole(Game game, Player player): Role(game, player)
 	{
-		protected override string RoleText => "主持人";
+		public override string RoleText => "主持人";
 		public void Whisper(Role target, string message)
 		{
 			message = $"[{Name}](悄悄对{target.Name}说){message}";
@@ -91,15 +91,15 @@ sealed class Game
 	}
 	sealed class WolfRole(Game game, Player player): Role(game, player)
 	{
-		protected override string RoleText => "狼人";
+		public override string RoleText => "狼人";
 	}
 	sealed class VillagerRole(Game game, Player player): Role(game, player)
 	{
-		protected override string RoleText => "村民";
+		public override string RoleText => "村民";
 	}
 	sealed class SeerRole(Game game, Player player): Role(game, player)
 	{
-		protected override string RoleText => "预言家";
+		public override string RoleText => "预言家";
 	}
 	readonly List<Role> roles = [];
 	readonly HolderRole holder;
@@ -139,6 +139,8 @@ sealed class Game
 		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
 		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
 		holder.Say($"本局配置: {config.wolfCount}个狼人, {config.seerCount}个预言家, {config.villagerCount}个村民");
+		foreach(var role in roles)
+			role.Notify($"你的身份是{role.RoleText}");
 		return;
 		void addWolf()
 		{
@@ -163,7 +165,7 @@ sealed class Game
 	{
 		holder.Say("天黑请闭眼");
 		foreach(var role in roles) role.Notify("你闭上了眼");
-		holder.Say("狼人请睁眼互相确认身份");
+		holder.Say("狼人请睁眼互相确认身份.本轮仅确认身份,不杀人");
 		foreach(var role in roles.OfType<WolfRole>())
 		{
 			var wolves = string.Join(", ", roles.OfType<WolfRole>().Where(r => r != role).Select(static r => r.Name));
@@ -171,10 +173,10 @@ sealed class Game
 		}
 		holder.Say("狼人请闭眼");
 		foreach(var role in roles.OfType<WolfRole>()) role.Notify("你闭上了眼");
-		holder.Say("天亮了.本轮仅确认身份,不杀人.没有任何人死亡");
+		holder.Say("天亮了.");
 		foreach(var role in roles) role.Notify("你睁开了眼");
 		var originIndex = new Random().Next(0, roles.Count);
-		holder.Say($"请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
+		holder.Say($"刚才的回合仅是互相确认身份,按照规则不会发生任何事情.狼人没有杀人,预言家没有验身份.现在请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
 		await discuss(originIndex, "请发言");
 		while(true)
 		{
