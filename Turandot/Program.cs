@@ -12,6 +12,13 @@ Console.WriteLine("按任意键退出");
 Console.ReadKey(true);
 sealed class Game
 {
+	struct Config
+	{
+		public int wolfCount;
+		public int seerCount;
+		public int villagerCount;
+		public readonly int Count => wolfCount + seerCount + villagerCount;
+	}
 	sealed class Player(string name)
 	{
 		public readonly string name = name;
@@ -90,33 +97,67 @@ sealed class Game
 	{
 		protected override string RoleText => "村民";
 	}
+	sealed class SeerRole(Game game, Player player): Role(game, player)
+	{
+		protected override string RoleText => "预言家";
+	}
 	readonly List<Role> roles = [];
 	readonly HolderRole holder;
+	readonly List<Player> players;
 	readonly (string endpoint, string apiKey, string modelId) credentials;
+	readonly Config config;
 	public Game((string endpoint, string apiKey, string modelId) creds)
 	{
+		players = new[] {"ethan", "dove", "frank", "alice", "bob", "carol", "grace", "heidy", "ivan",}.Select(static name => new Player(name)).ToList();
+		config = players.Count switch
+		{
+			4 => new() {wolfCount = 1, seerCount = 1, villagerCount = 2,},
+			5 => new() {wolfCount = 1, seerCount = 1, villagerCount = 3,},
+			6 => new() {wolfCount = 2, seerCount = 1, villagerCount = 3,},
+			7 => new() {wolfCount = 2, seerCount = 1, villagerCount = 4,},
+			8 => new() {wolfCount = 3, seerCount = 1, villagerCount = 4,},
+			9 => new() {wolfCount = 3, seerCount = 1, villagerCount = 5,},
+			_ => throw new ArgumentException("不支持的玩家数量", nameof(creds)),
+		};
+		if(config.Count != players.Count) throw new ArgumentException("角色数量与玩家数量不匹配", nameof(creds));
 		credentials = creds;
 		holder = new(this, new("daniel"));
-	}
-	public async Task PlayAsync()
-	{
 		var random = new Random((int)DateTime.Now.Ticks);
-		var playerNames = new[] {"ethan", "dove", "frank", "alice", "bob", "carol", "grace", "heidy", "ivan",};
-		var players = playerNames.Select(static name => new Player(name)).ToList();
 		for(var i = players.Count; i-- > 0;)
 		{
 			var j = random.Next(0, i + 1);
 			(players[i], players[j]) = (players[j], players[i]);
 		}
-		for(var i = 0; i < 3; ++i)
-			roles.Add(new WolfRole(this, players[i]));
-		for(var i = 3; i < players.Count; ++i)
-			roles.Add(new VillagerRole(this, players[i]));
+		for(var i = config.wolfCount; i-- > 0;) addWolf();
+		for(var i = config.seerCount; i-- > 0;) addSeer();
+		for(var i = config.villagerCount; i-- > 0;) addVillager();
 		for(var i = roles.Count; i-- > 0;)
 		{
 			var j = random.Next(0, i + 1);
 			(roles[i], roles[j]) = (roles[j], roles[i]);
 		}
+		return;
+		void addWolf()
+		{
+			var player = players[^1];
+			players.RemoveAt(players.Count - 1);
+			roles.Add(new WolfRole(this, player));
+		}
+		void addSeer()
+		{
+			var player = players[^1];
+			players.RemoveAt(players.Count - 1);
+			roles.Add(new SeerRole(this, player));
+		}
+		void addVillager()
+		{
+			var player = players[^1];
+			players.RemoveAt(players.Count - 1);
+			roles.Add(new VillagerRole(this, player));
+		}
+	}
+	public async Task PlayAsync()
+	{
 		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
 		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
 		holder.Say($"其中有{roles.Count(static r => r is WolfRole)}个狼人,其他都是村民");
