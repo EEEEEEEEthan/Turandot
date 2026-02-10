@@ -136,9 +136,33 @@ sealed class Game
 		{
 			killed.dead = true;
 			holder.Say($"天亮了,昨晚{killed.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
-			await discuss(roles.IndexOf(killed) + 1, "请发言");
+			await discuss(roles.IndexOf(killed) + 1, "请依次发言.每人只有一次发言机会");
+			var executed = await voteExecute();
+			if(executed is {})
+			{
+				executed.dead = true;
+				holder.Say($"{executed.Name}被投票处决");
+				var lastWords = await executed.Prompt("请发表遗言");
+				executed.Say(lastWords);
+			}
 		}
 		return;
+		async Task<Role?> voteExecute()
+		{
+			var alive = roles.Where(static r => !r.dead).ToList();
+			if(alive.Count == 0) return null;
+			var votes = new Dictionary<Role, int>();
+			foreach(var role in alive)
+			{
+				var target = await role.Select("请投票选出要处决的玩家", alive);
+				votes.TryGetValue(target, out var count);
+				votes[target] = count + 1;
+			}
+			var maxVotes = votes.Values.Max();
+			var top = votes.Where(kv => kv.Value == maxVotes).ToList();
+			if(top.Count != 1) return null; // 平票不处决
+			return top[0].Key;
+		}
 		async Task discuss(int firstIndex, string prompt)
 		{
 			for(var i = 0; i < roles.Count; i++)
