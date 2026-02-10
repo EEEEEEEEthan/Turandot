@@ -47,28 +47,55 @@ class Game
 		var wolves = roles.OfType<WolfRole>().ToList();
 		var villagers = roles.OfType<PeasantRole>().Select(static r => r.name).ToList();
 		var villagerList = string.Join("，", villagers);
+		Dictionary<WolfRole, string>? previousRoundChoices = null;
 		while(true)
 		{
 			var choices = new Dictionary<WolfRole, string>();
 			foreach(var w in wolves)
 			{
 				var wolf = w;
+				var otherLastRound = previousRoundChoices is null
+					? ""
+					: "\n上一轮其他狼人的选择："
+					+ string.Join(
+						"，",
+						wolves
+							.Where(wo => wo != wolf)
+							.Where(wo => previousRoundChoices.TryGetValue(wo, out _))
+							.Select(wo => $"{wo.name}选了{previousRoundChoices[wo]}"));
+				const string toolName = "select_target";
 				var tool = new LLM.ToolSpec(
-					"select_target",
+					toolName,
 					"选择今晚要击杀的玩家，调用后狼人们会得知当前选择。",
-					[new LLM.ParameterSpec("目标玩家", "要击杀的玩家名字", typeof(string), true)],
+					[new("目标玩家", "要击杀的玩家名字", typeof(string), true),],
 					(payload, _) =>
 					{
 						var target = (string)payload["目标玩家"]!;
 						choices[wolf] = target;
-						BroadcastMessage($"[仅狼人]{wolf.name}选择击杀：{target}", static r => r is WolfRole);
 						return Task.FromResult("已记录你的选择");
 					});
-				var messages = wolf.context.Concat([
-					new(AuthorRole.User,
-						$"请选择今晚要击杀的目标玩家。可选：{villagerList}。请调用选择击杀目标工具，参数为你要击杀的玩家名字。"),
-				]);
-				await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, messages, [tool], 0.6f);
+				var messages = wolf
+					.context
+					.Concat(
+					[
+						new(
+							AuthorRole.User,
+							$"请选择今晚要击杀的目标玩家。可选：{villagerList}。{otherLastRound}\n请调用选择击{toolName}工具，参数为你要击杀的玩家名字。"),
+					])
+					.ToList();
+				while(true)
+				{
+					var reply = await LLM.SendAsync(
+						credentials.endpoint,
+						credentials.apiKey,
+						credentials.modelId,
+						messages,
+						[tool,],
+						0.6f);
+					if(choices.ContainsKey(wolf)) break;
+					messages.Add(new(AuthorRole.Assistant, reply));
+					messages.Add(new(AuthorRole.User, "你必须调用选择击杀目标工具，参数为要击杀的玩家名字。"));
+				}
 			}
 			if(choices.Values.Distinct().Count() == 1)
 			{
@@ -76,6 +103,7 @@ class Game
 				BroadcastMessage("狼人一致选择击杀 " + targetName, static r => r is WolfRole);
 				return roles.First(r => r.name == targetName);
 			}
+			previousRoundChoices = new(choices);
 			BroadcastMessage("狼人目标不一致，请重新选择", static r => r is WolfRole);
 		}
 	}
