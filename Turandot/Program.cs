@@ -16,8 +16,9 @@ sealed class Game
 	{
 		public int wolfCount;
 		public int seerCount;
+		public int witchCount;
 		public int villagerCount;
-		public readonly int Count => wolfCount + seerCount + villagerCount;
+		public readonly int Count => wolfCount + seerCount + witchCount + villagerCount;
 	}
 	sealed class Player(string name, string personalityPrompts = "毫无特色")
 	{
@@ -28,7 +29,7 @@ sealed class Game
 	{
 		public readonly Player player = player;
 		public bool dead;
-		readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
+		protected readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
 		public string Name => player.name;
 		public abstract string RoleText { get; }
 		public abstract string Goal { get; }
@@ -108,6 +109,42 @@ sealed class Game
 		public override string RoleText => "预言家";
 		public override string Goal => "你的目标是让狼人死光";
 	}
+	sealed class WitchRole(Game game, Player player): Role(game, player)
+	{
+		public override string RoleText => "女巫";
+		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家(整局只能用一次)";
+		bool hasSavePotion = true;
+		/// <summary>女巫决定是否用救药救活被刀玩家，返回 true 表示使用救药</summary>
+		public Task<bool> TrySaveAsync(Role killed)
+		{
+			if(!hasSavePotion) return Task.FromResult(false);
+			return DecideSaveAsync(killed);
+		}
+		async Task<bool> DecideSaveAsync(Role killed)
+		{
+			var prompt = $"昨晚{killed.Name}被狼人杀死。请决定是否使用救药救活TA。救则返回true，不救则返回false";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[救/不救]");
+			const string toolName = "witch_save";
+			bool? saved = null;
+			while(saved is null)
+			{
+				var tool = new LLM.ToolSpec(
+					toolName,
+					$"选择是否使用救药(你的性格:{player.personalityPrompts})",
+					[new("use_save", "是否使用救药救活，true=救/false=不救", typeof(bool), true),],
+					(payload, _) =>
+					{
+						saved = (bool)payload["use_save"]!;
+						return Task.FromResult("已记录你的选择");
+					});
+				var copied = new List<ChatMessageContent>(context) { new(AuthorRole.User, prompt), };
+				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
+			}
+			if(saved == true) hasSavePotion = false;
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择{(saved == true ? "救" : "不救")}");
+			return saved == true;
+		}
+	}
 	readonly List<Role> roles = [];
 	readonly HolderRole holder;
 	readonly List<Player> players;
@@ -128,15 +165,16 @@ sealed class Game
 		];
 		Config config = players.Count switch
 		{
-			4 => new() {wolfCount = 1, seerCount = 1, villagerCount = 2,},
-			5 => new() {wolfCount = 1, seerCount = 1, villagerCount = 3,},
-			6 => new() {wolfCount = 2, seerCount = 1, villagerCount = 3,},
-			7 => new() {wolfCount = 2, seerCount = 1, villagerCount = 4,},
-			8 => new() {wolfCount = 3, seerCount = 1, villagerCount = 4,},
-			9 => new() {wolfCount = 3, seerCount = 1, villagerCount = 5,},
+			4 => new() {wolfCount = 1, seerCount = 1, witchCount = 1, villagerCount = 1,},
+			5 => new() {wolfCount = 1, seerCount = 1, witchCount = 1, villagerCount = 2,},
+			6 => new() {wolfCount = 2, seerCount = 1, witchCount = 1, villagerCount = 2,},
+			7 => new() {wolfCount = 2, seerCount = 1, witchCount = 1, villagerCount = 3,},
+			8 => new() {wolfCount = 3, seerCount = 1, witchCount = 1, villagerCount = 3,},
+			9 => new() {wolfCount = 3, seerCount = 1, witchCount = 1, villagerCount = 4,},
 			_ => throw new ArgumentException("不支持的玩家数量", nameof(creds)),
 		};
 		if(config.seerCount > 1) throw new ArgumentException("预言家数量不能大于1", nameof(creds));
+		if(config.witchCount > 1) throw new ArgumentException("女巫数量不能大于1", nameof(creds));
 		if(config.Count != players.Count) throw new ArgumentException("角色数量与玩家数量不匹配", nameof(creds));
 		credentials = creds;
 		holder = new(this, new("daniel"));
@@ -148,6 +186,7 @@ sealed class Game
 		}
 		for(var i = config.wolfCount; i-- > 0;) addWolf();
 		for(var i = config.seerCount; i-- > 0;) addSeer();
+		for(var i = config.witchCount; i-- > 0;) addWitch();
 		for(var i = config.villagerCount; i-- > 0;) addVillager();
 		for(var i = roles.Count; i-- > 0;)
 		{
@@ -156,7 +195,7 @@ sealed class Game
 		}
 		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
 		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
-		holder.Say($"本局配置: {config.wolfCount}个狼人, {config.seerCount}个预言家, {config.villagerCount}个村民");
+		holder.Say($"本局配置: {config.wolfCount}个狼人, {config.seerCount}个预言家, {config.witchCount}个女巫, {config.villagerCount}个村民");
 		foreach(var role in roles)
 			role.Notify($"你的身份是{role.RoleText}。你的目标是{role.Goal}");
 		return;
@@ -171,6 +210,12 @@ sealed class Game
 			var player = players[^1];
 			players.RemoveAt(players.Count - 1);
 			roles.Add(new SeerRole(this, player));
+		}
+		void addWitch()
+		{
+			var player = players[^1];
+			players.RemoveAt(players.Count - 1);
+			roles.Add(new WitchRole(this, player));
 		}
 		void addVillager()
 		{
@@ -200,15 +245,16 @@ sealed class Game
 		{
 			holder.Say("天黑请闭眼");
 			var killed = await wolfTurn();
+			var saved = killed is { } k && await witchTurn(k);
 			await seerTurn();
-			if(killed is null)
+			if(killed is null || saved)
 			{
 				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
 				await discuss(originIndex, "请发言");
 			}
 			else
 			{
-				killed.dead = true;
+				killed!.dead = true;
 				holder.Say($"天亮了,昨晚{killed.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
 				await discuss(roles.IndexOf(killed) + 1, "请依次发言.每人只有一次发言机会");
 				var executed = await voteExecute();
@@ -221,7 +267,7 @@ sealed class Game
 				}
 			}
 			var wolfCount = roles.Count(static r => r is WolfRole {dead: false,});
-			var villagerCount = roles.Count(static r => r is VillagerRole {dead: false,});
+			var villagerCount = roles.Count(static r => !r.dead && r is not WolfRole);
 			if(wolfCount >= villagerCount)
 			{
 				holder.Say("游戏结束, 狼人胜利");
@@ -292,6 +338,23 @@ sealed class Game
 				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify(message);
 				return null;
 			}
+		}
+		async Task<bool> witchTurn(Role killed)
+		{
+			var witches = roles.OfType<WitchRole>().Where(static r => !r.dead).ToList();
+			if(witches.Count == 0) return false;
+			holder.Say("女巫请睁眼");
+			foreach(var witch in witches) witch.Notify("你睁开了眼");
+			foreach(var witch in witches) holder.Whisper(witch, $"昨晚{killed.Name}被狼人杀死。你是否使用救药救活TA？");
+			var saved = false;
+			foreach(var witch in witches)
+			{
+				if(await witch.TrySaveAsync(killed)) saved = true;
+			}
+			foreach(var witch in witches) witch.Notify("你闭上了眼");
+			holder.Say("女巫请闭眼");
+			if(saved) holder.Say($"女巫使用救药救活了{killed.Name}");
+			return saved;
 		}
 		async Task seerTurn()
 		{
