@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Turandot;
@@ -56,15 +57,16 @@ sealed class Game
 		}
 		public void Notify(string message)
 		{
-			message = $"[system]{message}";
+			message = $"[{Name}]{message}";
 			context.Add(new(AuthorRole.System, message));
 			using(new ConsoleColorScope(ConsoleColor.DarkGray))
 				Console.WriteLine(message);
 		}
 		public Task<string> Prompt(string prompt)
 		{
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}\n(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`)");
-			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
+			prompt = $"你是{Name},请发言:{prompt}";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
+			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化)"),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
@@ -89,6 +91,7 @@ sealed class Game
 				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
 			}
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择了{target.Name}");
 			return target;
 		}
 	}
@@ -123,13 +126,13 @@ sealed class Game
 		holder.Say("天亮了");
 		foreach(var role in roles) role.Notify("你睁开了眼");
 		var originIndex = new Random().Next(0, roles.Count);
-		await discuss(originIndex, "请大家依次自我介绍并发表第一轮讨论");
+		holder.Say($"请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍");
+		await discuss(originIndex, "请发言");
 		holder.Say("天黑请闭眼");
 		var killed = await kill();
 		if(killed is null)
 		{
-			holder.Say("天亮了,昨晚没有玩家死亡");
-			holder.Say($"昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
+			holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
 			await discuss(originIndex, "请发言");
 		}
 		else
@@ -195,7 +198,7 @@ sealed class Game
 				foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,}))
 				{
 					var aliveRoles = roles.Where(static r => !r.dead).ToList();
-					var target = await aliveRoles[0].Select("请选择你要杀死的玩家", aliveRoles.Where(static r => !r.dead).ToList());
+					var target = await role.Select("请选择你要杀死的玩家", aliveRoles.Where(static r => !r.dead).ToList());
 					votes[role] = target;
 				}
 				if(votes.Values.Distinct().Count() == 1) return votes.Values.First();
