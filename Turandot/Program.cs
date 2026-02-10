@@ -19,17 +19,19 @@ sealed class Game
 		public int villagerCount;
 		public readonly int Count => wolfCount + seerCount + villagerCount;
 	}
-	sealed class Player(string name)
+	sealed class Player(string name, string personalityPrompts = "毫无特色")
 	{
+		public readonly string personalityPrompts = personalityPrompts;
 		public readonly string name = name;
 	}
 	abstract class Role(Game game, Player player)
 	{
 		public readonly Player player = player;
 		public bool dead;
-		readonly List<ChatMessageContent> context = [];
+		readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
 		public string Name => player.name;
 		public abstract string RoleText { get; }
+		public abstract string Goal { get; }
 		public void AppendMessage(ChatMessageContent content) { context.Add(content); }
 		public void Say(string message)
 		{
@@ -47,16 +49,17 @@ sealed class Game
 		}
 		public Task<string> Prompt(string prompt)
 		{
-			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
+			prompt = $"你是{Name}({RoleText},你的性格:{player.personalityPrompts}),请发言:{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
-			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化)"),};
+			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人)"),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
 		{
 			if(options.Count <= 0) throw new ArgumentException("选项不能为空", nameof(options));
 			var availableOptions = string.Join("，", options.Select(static r => r.Name));
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}({availableOptions})");
+			prompt = $"你是{Name}({RoleText},你的性格:{player.personalityPrompts}),现在选择目标.{prompt}";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
 			const string toolName = "select_target";
 			Role? target = null;
 			while(target is null)
@@ -82,6 +85,7 @@ sealed class Game
 	sealed class HolderRole(Game game, Player player): Role(game, player)
 	{
 		public override string RoleText => "主持人";
+		public override string Goal => "报流程、传话就行，别自己加戏～";
 		public void Whisper(Role target, string message)
 		{
 			message = $"[{Name}](悄悄对{target.Name}说){message}";
@@ -92,14 +96,17 @@ sealed class Game
 	sealed class WolfRole(Game game, Player player): Role(game, player)
 	{
 		public override string RoleText => "狼人";
+		public override string Goal => "你的目标是尽可能杀死村民,让村民数量小于等于狼人数量相等你就赢了.";
 	}
 	sealed class VillagerRole(Game game, Player player): Role(game, player)
 	{
 		public override string RoleText => "村民";
+		public override string Goal => "你的目标是让狼人死光";
 	}
 	sealed class SeerRole(Game game, Player player): Role(game, player)
 	{
 		public override string RoleText => "预言家";
+		public override string Goal => "你的目标是让狼人死光";
 	}
 	readonly List<Role> roles = [];
 	readonly HolderRole holder;
@@ -107,7 +114,18 @@ sealed class Game
 	readonly (string endpoint, string apiKey, string modelId) credentials;
 	public Game((string endpoint, string apiKey, string modelId) creds)
 	{
-		players = new[] {"ethan", "dove", "frank", "alice", "bob", "carol", "grace", "heidy", "ivan",}.Select(static name => new Player(name)).ToList();
+		players =
+		[
+			new("ethan", "狼人时倾向自刀做身份、骗女巫救或银水;好人时对银水信任度高,会据此排坑"),
+			new("ziham", "首轮爱起跳或反水,用激进发言带风向;狼时敢对刚真预言家,好人时也常先手压人"),
+			new("luna", "前几轮几乎不发言,靠听票型和发言细节记笔记;轮次关键时才长发言,一击必中"),
+			new("mike", "被点或站错队时语气会抖、重复用词;好人被冤容易情绪化,狼被踩时反而话多辩解"),
+			new("alice", "发言按时间线盘谁跟谁、谁保谁,爱画身份链;信逻辑不信状态,容易忽略演技型玩家"),
+			new("leo", "听完强势方发言容易改票;谁语气肯定就跟谁,容易被狼队煽动或好人带队带着走"),
+			new("nina", "常用'我不太会玩''我搞不清'降低存在感,实则抿人准、刀法稳;装懵时细节会露馅"),
+			new("ryan", "故意说反逻辑、假站边或模糊立场,让全场混乱;狼时搅局抗推,好人时也爱开玩笑干扰判断"),
+			new("sara", "拿预言家必报查验、要警徽、强势归票;好人时见不公就开怼,容易成为狼队首刀或抗推目标"),
+		];
 		Config config = players.Count switch
 		{
 			4 => new() {wolfCount = 1, seerCount = 1, villagerCount = 2,},
@@ -140,7 +158,7 @@ sealed class Game
 		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
 		holder.Say($"本局配置: {config.wolfCount}个狼人, {config.seerCount}个预言家, {config.villagerCount}个村民");
 		foreach(var role in roles)
-			role.Notify($"你的身份是{role.RoleText}");
+			role.Notify($"你的身份是{role.RoleText}。你的目标是{role.Goal}");
 		return;
 		void addWolf()
 		{
