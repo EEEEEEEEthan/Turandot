@@ -28,6 +28,22 @@ sealed class Game
 	{
 		public PeasantRole(string name): base(name) { context.Add(new(AuthorRole.System, $"你叫{name},你们在玩狼人,你抽到的角色是村民。")); }
 	}
+	static void PrintLine(object? message) { Console.WriteLine(message); }
+	static void Print(object? message) { Console.Write(message); }
+	static void PrintLineColored(ConsoleColor color, object? message)
+	{
+		var previousColor = Console.ForegroundColor;
+		Console.ForegroundColor = color;
+		Console.WriteLine(message);
+		Console.ForegroundColor = previousColor;
+	}
+	static void PrintColored(ConsoleColor color, object? message)
+	{
+		var previousColor = Console.ForegroundColor;
+		Console.ForegroundColor = color;
+		Console.Write(message);
+		Console.ForegroundColor = previousColor;
+	}
 	readonly List<Role> roles = [];
 	public async Task PlayAsync((string endpoint, string apiKey, string modelId) credentials)
 	{
@@ -39,9 +55,13 @@ sealed class Game
 		BroadcastMessage("游戏开始了,在场的玩家有ethan,dove,alice,bob,carol。其中2个狼人,3个村民");
 		BroadcastMessage("天黑请闭眼");
 		BroadcastMessage("狼人请睁眼");
+		BroadcastMessage("狼人请确认身份");
+		foreach(var role in roles)
+			if(role is WolfRole)
+				BroadcastMessage($"{role.name}是狼人", static ro => ro is WolfRole);
 		BroadcastMessage("狼人请杀人");
-		var role = await Kill(credentials);
-		BroadcastMessage($"天亮了，{role.name}被杀死了。");
+		var killed = await Kill(credentials);
+		BroadcastMessage($"天亮了，{killed.name}被杀死了。");
 	}
 	async Task<Role> Kill((string endpoint, string apiKey, string modelId) credentials)
 	{
@@ -72,10 +92,7 @@ sealed class Game
 					(payload, _) =>
 					{
 						var target = (string)payload["目标玩家"]!;
-						var color = Console.ForegroundColor;
-						Console.ForegroundColor = ConsoleColor.DarkGray;
-						Console.WriteLine($"{wolf.name}选择了{target}");
-						Console.ForegroundColor = color;
+						PrintLineColored(ConsoleColor.DarkGray, $"{wolf.name}选择了{target}");
 						choices[wolf] = target;
 						return Task.FromResult("已记录你的选择");
 					});
@@ -118,6 +135,9 @@ sealed class Game
 			if(filter?.Invoke(role) == false) continue;
 			role.context.Add(new(AuthorRole.System, message));
 		}
-		Console.WriteLine(message);
+		if(filter is null)
+			PrintLine(message);
+		else
+			PrintLineColored(ConsoleColor.DarkGray, message);
 	}
 }
