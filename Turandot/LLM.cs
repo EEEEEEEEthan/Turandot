@@ -45,15 +45,13 @@ public static class LLM
 				yield return chunk.Content;
 	}
 	public static async Task<string> SendAsync(
-		string endpoint,
-		string apiKey,
-		string modelId,
+		(string endpoint, string apiKey, string modelId) credentials,
 		IEnumerable<ChatMessageContent> messages,
 		IEnumerable<ToolSpec>? tools = null,
 		float temperature = 0.7f,
 		CancellationToken cancellationToken = default)
 	{
-		var kernel = BuildKernel(endpoint, apiKey, modelId, tools);
+		var kernel = BuildKernel(credentials.endpoint, credentials.apiKey, credentials.modelId, tools);
 		var chat = kernel.GetRequiredService<IChatCompletionService>();
 		var history = new ChatHistory(messages);
 		var settings = new OpenAIPromptExecutionSettings
@@ -89,9 +87,7 @@ public static class LLM
 					new ChatMessageContent(AuthorRole.User, "Test tool calling."),
 				};
 				var reply = await SendAsync(
-					endpoint,
-					apiKey,
-					modelId,
+					(endpoint, apiKey, modelId),
 					messages,
 					tools,
 					0.0f,

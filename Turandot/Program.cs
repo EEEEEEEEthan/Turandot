@@ -6,228 +6,133 @@ var apiKeyPath = Path.Combine(
 	Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
 	".apikey");
 var credentials = await LLM.EnsureApiKey(apiKeyPath);
-var game = new Game();
-await game.PlayAsync(credentials);
+var game = new Game(credentials);
+await game.PlayAsync();
 Console.WriteLine("按任意键退出");
 Console.ReadKey(true);
 sealed class Game
 {
-	class Role(string name)
+	enum RoleType
+	{
+		Holder,
+		Wolf,
+		Villager,
+	}
+	sealed class Player(string name)
 	{
 		public readonly string name = name;
-		public readonly List<ChatMessageContent> context =
-		[
-			new(AuthorRole.System, $"你叫{name},你们在玩狼人。"),
-		];
 	}
-	sealed class WolfRole: Role
+	sealed class Role
 	{
-		public WolfRole(string name): base(name) { context.Add(new(AuthorRole.System, $"你叫{name},你们在玩狼人,你抽到的角色是狼。")); }
-	}
-	sealed class PeasantRole: Role
-	{
-		public PeasantRole(string name): base(name) { context.Add(new(AuthorRole.System, $"你叫{name},你们在玩狼人,你抽到的角色是村民。")); }
-	}
-	static void PrintLine(object? message) { Console.WriteLine(message); }
-	static void Print(object? message) { Console.Write(message); }
-	static void PrintLineColored(ConsoleColor color, object? message)
-	{
-		var previousColor = Console.ForegroundColor;
-		Console.ForegroundColor = color;
-		Console.WriteLine(message);
-		Console.ForegroundColor = previousColor;
-	}
-	static void PrintColored(ConsoleColor color, object? message)
-	{
-		var previousColor = Console.ForegroundColor;
-		Console.ForegroundColor = color;
-		Console.Write(message);
-		Console.ForegroundColor = previousColor;
-	}
-	readonly List<Role> roles = [];
-	readonly HashSet<string> dead = [];
-	(string endpoint, string apiKey, string modelId) credentials;
-	IEnumerable<Role> Alive => roles.Where(r => !dead.Contains(r.name));
-	public async Task PlayAsync((string endpoint, string apiKey, string modelId) creds)
-	{
-		credentials = creds;
-		roles.Add(new WolfRole("ethan"));
-		roles.Add(new WolfRole("dove"));
-		roles.Add(new PeasantRole("alice"));
-		roles.Add(new PeasantRole("bob"));
-		roles.Add(new PeasantRole("carol"));
-		BroadcastMessage("[系统]游戏开始了,在场的玩家有ethan,dove,alice,bob,carol。其中2个狼人,3个村民");
-		BroadcastMessage("[系统]天黑请闭眼");
-		BroadcastMessage("[系统]狼人请睁眼");
-		BroadcastMessage("[系统]狼人请确认身份");
-		foreach(var role in roles)
-			if(role is WolfRole)
-				BroadcastMessage($"[系统]{role.name}是狼人", static ro => ro is WolfRole);
-		BroadcastMessage("[系统]天亮了.请大家自我介绍");
-		await SpeakRound("请自我介绍", Alive.OrderBy(static _ => Random.Shared.Next()).ToList());
-		BroadcastMessage("[系统]天黑请闭眼");
-		BroadcastMessage("[系统]狼人请杀人");
-		var killed = await Kill();
-		dead.Add(killed.name);
-		BroadcastMessage($"[系统]天亮了,{killed.name}被杀死了.从死者下家开始发言.");
-		var orderFromDeadNext = OrderFromNextTo(roles.FindIndex(r => r.name == killed.name));
-		await SpeakRound("投票前的讨论.每个人只有一次发言机会", orderFromDeadNext);
-		BroadcastMessage($"[系统]讨论完毕,现在开始投票.从死者下家开始投票");
-		var executed = await VoteExecute(orderFromDeadNext);
-		dead.Add(executed.name);
-		BroadcastMessage($"[系统]投票结果：{executed.name}被处决。");
-		var lastWordsMessages = executed
-			.context
-			.Concat([new(AuthorRole.User, "你被投票处决了，请发表遗言"),])
-			.ToList();
-		var lastWords = await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, lastWordsMessages);
-		BroadcastMessage($"[{executed.name}]:{lastWords}");
-	}
-	async Task<Role> VoteExecute(List<Role> order)
-	{
-		var names = order.Select(static r => r.name).ToList();
-		var nameList = string.Join("，", names);
-		Dictionary<Role, string> choices = [];
-		foreach(var r in order)
+		public readonly RoleType roleType;
+		public readonly Player player;
+		public bool dead;
+		readonly List<ChatMessageContent> context;
+		readonly Game game;
+		string Name => player.name;
+		public Role(Game game, RoleType roleType, Player player)
 		{
-			var role = r;
-			const string toolName = "vote";
-			var tool = new LLM.ToolSpec(
-				toolName,
-				"投票处决一名玩家",
-				[new("目标", "要投票处决的玩家名字", typeof(string), true),],
-				(payload, _) =>
-				{
-					var target = (string)payload["目标"]!;
-					PrintLineColored(ConsoleColor.DarkGray, $"{role.name}投票给{target}");
-					choices[role] = target;
-					return Task.FromResult("已记录");
-				});
-			var messages = role
-				.context
-				.Concat([new(AuthorRole.User, $"白天讨论结束，请投票处决一人。可选：{nameList}。请调用{toolName}工具。"),])
-				.ToList();
-			while(true)
+			this.game = game;
+			this.player = player;
+			this.roleType = roleType;
+			var roleText = roleType switch
 			{
-				var reply = await LLM.SendAsync(
-					credentials.endpoint,
-					credentials.apiKey,
-					credentials.modelId,
-					messages,
-					[tool,],
-					0.6f);
-				if(choices.ContainsKey(role)) break;
-				messages.Add(new(AuthorRole.Assistant, reply));
-				messages.Add(new(AuthorRole.User, "请调用vote工具，参数为要处决的玩家名字。"));
-			}
+				RoleType.Holder => "主持人",
+				RoleType.Wolf => "狼人",
+				RoleType.Villager => "村民",
+				_ => throw new ArgumentOutOfRangeException(nameof(roleType), roleType, null),
+			};
+			context =
+			[
+				new(AuthorRole.System, $"你是{Name},你们在玩狼人。你的身份是{roleText}"),
+			];
 		}
-		var grouped = choices.Values.GroupBy(static x => x).OrderByDescending(static g => g.Count()).ToList();
-		var maxCount = grouped.First().Count();
-		var tied = grouped.Where(g => g.Count() == maxCount).Select(static g => g.Key).ToList();
-		var chosen = tied.Count == 1? tied[0] : tied[new Random().Next(tied.Count)];
-		return roles.First(r => r.name == chosen);
-	}
-	async Task<Role> Kill()
-	{
-		var wolves = roles.OfType<WolfRole>().Where(w => !dead.Contains(w.name)).ToList();
-		var aliveNames = Alive.Select(r => r.name).ToList();
-		var targetList = string.Join("，", aliveNames);
-		Dictionary<WolfRole, string>? previousRoundChoices = null;
-		while(true)
+		public void Say(string message)
 		{
-			var choices = new Dictionary<WolfRole, string>();
-			foreach(var w in wolves)
+			message = $"[{Name}]{message}";
+			foreach(var role in game.roles)
+				role.context.Add(new(AuthorRole.Assistant, message));
+			Console.WriteLine(message);
+		}
+		public void Notify(string message)
+		{
+			message = $"[system]{message}";
+			context.Add(new(AuthorRole.System, message));
+			Console.WriteLine(message);
+		}
+		public Task<string> Prompt(string prompt)
+		{
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
+			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
+			return LLM.SendAsync(game.credentials, copied);
+		}
+		public async Task<Role> Select(string prompt, List<Role> options)
+		{
+			var availableOptions = string.Join("，", options.Select(static r => r.Name));
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}({availableOptions})");
+			const string toolName = "select_target";
+			Role? target = null;
+			while(target is null)
 			{
-				var wolf = w;
-				var otherLastRound = previousRoundChoices is null
-					? ""
-					: "\n上一轮其他狼人的选择："
-					+ string.Join(
-						"，",
-						wolves
-							.Where(wo => wo != wolf)
-							.Where(wo => previousRoundChoices.TryGetValue(wo, out _))
-							.Select(wo => $"{wo.name}选了{previousRoundChoices[wo]}"));
-				const string toolName = "select_target";
 				var tool = new LLM.ToolSpec(
 					toolName,
-					"选择今晚要击杀的玩家，调用后狼人们会得知当前选择。只能选存活玩家。",
-					[new("目标玩家", "要击杀的玩家名字", typeof(string), true),],
+					"选择一个玩家",
+					[new("target", $"玩家名字,{availableOptions}中的一个", typeof(string), true),],
 					(payload, _) =>
 					{
-						var target = (string)payload["目标玩家"]!;
-						PrintLineColored(ConsoleColor.DarkGray, $"{wolf.name}选择了{target}");
-						choices[wolf] = target;
+						var t = (string)payload["target"]!;
+						target = options.FirstOrDefault(r => r.Name == t);
+						if(target is null) return Task.FromResult($"无效的选择。请选择{availableOptions}");
 						return Task.FromResult("已记录你的选择");
 					});
-				var messages = wolf
-					.context
-					.Concat(
-					[
-						new(
-							AuthorRole.User,
-							$"请选择今晚要击杀的目标玩家。可选（仅存活）：{targetList}。{otherLastRound}\n请调用选择击{toolName}工具，参数为你要击杀的玩家名字。"),
-					])
-					.ToList();
-				while(true)
-				{
-					var reply = await LLM.SendAsync(
-						credentials.endpoint,
-						credentials.apiKey,
-						credentials.modelId,
-						messages,
-						[tool,],
-						0.6f);
-					if(choices.ContainsKey(wolf)) break;
-					messages.Add(new(AuthorRole.Assistant, reply));
-					messages.Add(new(AuthorRole.User, "你必须调用选择击杀目标工具，参数为要击杀的玩家名字。"));
-				}
+				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
+				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
 			}
-			if(choices.Values.Distinct().Count() == 1)
-			{
-				var targetName = choices.Values.First();
-				return roles.First(r => r.name == targetName);
-			}
-			previousRoundChoices = new(choices);
-			BroadcastMessage("狼人目标不一致，请重新选择", static r => r is WolfRole);
+			return target;
 		}
 	}
-	/// <summary>从指定玩家下家开始的存活顺序（环状）</summary>
-	List<Role> OrderFromNextTo(int index)
+	readonly List<Role> roles = [];
+	readonly Role holder;
+	readonly (string endpoint, string apiKey, string modelId) credentials;
+	public Game((string endpoint, string apiKey, string modelId) creds)
 	{
-		var alive = Alive.ToList();
-		if(index < 0) return alive;
-		var ordered = new List<Role>();
-		for(var i = 1; i <= roles.Count; i++)
-		{
-			var r = roles[(index + i) % roles.Count];
-			if(!dead.Contains(r.name)) ordered.Add(r);
-		}
-		return ordered;
+		credentials = creds;
+		holder = new(this, RoleType.Holder, new("daniel"));
+		_ = PlayAsync();
 	}
-	async Task SpeakRound(string prompt, List<Role> order)
+	public async Task PlayAsync()
 	{
-		foreach(var role in order)
+		roles.Add(new(this, RoleType.Wolf, new("ethan")));
+		roles.Add(new(this, RoleType.Wolf, new("dove")));
+		roles.Add(new(this, RoleType.Villager, new("alice")));
+		roles.Add(new(this, RoleType.Villager, new("bob")));
+		roles.Add(new(this, RoleType.Villager, new("carol")));
+		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.player.name}");
+		holder.Say("天黑请闭眼");
+		holder.Say("狼人请睁眼");
+		foreach(var role in roles.Where(static r => r.roleType == RoleType.Wolf))
 		{
-			var messages = role
-				.context
-				.Concat([new(AuthorRole.User, prompt),])
-				.ToList();
-			var content = await LLM.SendAsync(credentials.endpoint, credentials.apiKey, credentials.modelId, messages);
-			var msg = $"[{role.name}]{content}";
-			BroadcastMessage(msg);
+			var wolves = string.Join(", ", roles.Where(r => r != role && r.roleType == RoleType.Wolf));
+			role.Notify($"你睁开眼,发现{wolves}和你一样也是狼人");
+		}
+		holder.Say("狼人请闭眼");
+		holder.Say("天亮了");
+		var index = new Random().Next(0, roles.Count);
+		holder.Say($"从{roles[index].player.name}开始依次发言");
+		for(var i = 0; i < roles.Count; i++)
+		{
+			var role = roles[(index + i) % roles.Count];
+			role.Say(await role.Prompt("请做一个简单的发言"));
 		}
 	}
-	void BroadcastMessage(string message, Func<Role, bool>? filter = null)
+}
+file readonly struct ConsoleColorScope: IDisposable
+{
+	readonly ConsoleColor original;
+	public ConsoleColorScope(ConsoleColor color)
 	{
-		foreach(var role in roles)
-		{
-			if(filter?.Invoke(role) == false) continue;
-			role.context.Add(new(AuthorRole.System, message));
-		}
-		if(filter is null)
-			PrintLine(message);
-		else
-			PrintLineColored(ConsoleColor.DarkGray, message);
+		original = Console.ForegroundColor;
+		Console.ForegroundColor = color;
 	}
+	public void Dispose() { Console.ForegroundColor = original; }
 }
