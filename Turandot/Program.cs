@@ -12,39 +12,25 @@ Console.WriteLine("按任意键退出");
 Console.ReadKey(true);
 sealed class Game
 {
-	enum RoleType
-	{
-		Holder,
-		Wolf,
-		Villager,
-	}
 	sealed class Player(string name)
 	{
 		public readonly string name = name;
 	}
-	sealed class Role
+	abstract class Role
 	{
-		public readonly RoleType roleType;
+		protected abstract string RoleText { get; }
 		public readonly Player player;
 		public bool dead;
 		readonly List<ChatMessageContent> context;
 		readonly Game game;
 		public string Name => player.name;
-		public Role(Game game, RoleType roleType, Player player)
+		protected Role(Game game, Player player)
 		{
 			this.game = game;
 			this.player = player;
-			this.roleType = roleType;
-			var roleText = roleType switch
-			{
-				RoleType.Holder => "主持人",
-				RoleType.Wolf => "狼人",
-				RoleType.Villager => "村民",
-				_ => throw new ArgumentOutOfRangeException(nameof(roleType), roleType, null),
-			};
 			context =
 			[
-				new(AuthorRole.System, $"你是{Name},你们在玩狼人。你的身份是{roleText}"),
+				new(AuthorRole.System, $"你是{Name},你们在玩狼人。你的身份是{RoleText}"),
 			];
 		}
 		public void Say(string message)
@@ -95,13 +81,28 @@ sealed class Game
 			return target;
 		}
 	}
+	sealed class HolderRole : Role
+	{
+		protected override string RoleText => "主持人";
+		public HolderRole(Game game, Player player) : base(game, player) { }
+	}
+	sealed class WolfRole : Role
+	{
+		protected override string RoleText => "狼人";
+		public WolfRole(Game game, Player player) : base(game, player) { }
+	}
+	sealed class VillagerRole : Role
+	{
+		protected override string RoleText => "村民";
+		public VillagerRole(Game game, Player player) : base(game, player) { }
+	}
 	readonly List<Role> roles = [];
-	readonly Role holder;
+	readonly HolderRole holder;
 	readonly (string endpoint, string apiKey, string modelId) credentials;
 	public Game((string endpoint, string apiKey, string modelId) creds)
 	{
 		credentials = creds;
-		holder = new(this, RoleType.Holder, new("daniel"));
+		holder = new HolderRole(this, new Player("daniel"));
 	}
 	public async Task PlayAsync()
 	{
@@ -114,9 +115,9 @@ sealed class Game
 			(players[i], players[j]) = (players[j], players[i]);
 		}
 		for(var i = 0; i < 3; ++i)
-			roles.Add(new(this, RoleType.Wolf, players[i]));
+			roles.Add(new WolfRole(this, players[i]));
 		for(var i = 3; i < players.Count; ++i)
-			roles.Add(new(this, RoleType.Villager, players[i]));
+			roles.Add(new VillagerRole(this, players[i]));
 		for(var i = roles.Count; i-- > 0;)
 		{
 			var j = random.Next(0, i + 1);
@@ -124,17 +125,17 @@ sealed class Game
 		}
 		holder.Say($"欢迎大家来玩狼人.我是主持人{holder.Name}");
 		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
-		holder.Say($"其中有{roles.Count(static r => r.roleType == RoleType.Wolf)}个狼人,其他都是村民");
+		holder.Say($"其中有{roles.Count(static r => r is WolfRole)}个狼人,其他都是村民");
 		holder.Say("天黑请闭眼");
 		foreach(var role in roles) role.Notify("你闭上了眼");
 		holder.Say("狼人请睁眼互相确认身份");
-		foreach(var role in roles.Where(static r => r.roleType == RoleType.Wolf))
+		foreach(var role in roles.OfType<WolfRole>())
 		{
-			var wolves = string.Join(", ", roles.Where(r => r != role && r.roleType == RoleType.Wolf).Select(static r => r.Name));
+			var wolves = string.Join(", ", roles.OfType<WolfRole>().Where(r => r != role).Select(static r => r.Name));
 			role.Notify($"你睁开眼,发现{wolves}和你一样也是狼人");
 		}
 		holder.Say("狼人请闭眼");
-		foreach(var role in roles.Where(static r => r.roleType == RoleType.Wolf)) role.Notify("你闭上了眼");
+		foreach(var role in roles.OfType<WolfRole>()) role.Notify("你闭上了眼");
 		holder.Say("天亮了");
 		foreach(var role in roles) role.Notify("你睁开了眼");
 		var originIndex = new Random().Next(0, roles.Count);
@@ -163,8 +164,8 @@ sealed class Game
 					executed.Say(lastWords);
 				}
 			}
-			var wolfCount = roles.Count(static r => r is {roleType: RoleType.Wolf, dead: false,});
-			var villagerCount = roles.Count(static r => r is {roleType: RoleType.Villager, dead: false,});
+			var wolfCount = roles.Count(static r => r is WolfRole { dead: false });
+			var villagerCount = roles.Count(static r => r is VillagerRole { dead: false });
 			if(wolfCount >= villagerCount)
 			{
 				holder.Say("游戏结束, 狼人胜利");
@@ -206,7 +207,7 @@ sealed class Game
 		async Task<Role?> kill()
 		{
 			holder.Say("狼人请睁眼");
-			foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,})) role.Notify("你睁开了眼");
+			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
 			for(var i = 0; i < roles.Count; i++)
 			{
 				var target = await vote();
@@ -222,7 +223,7 @@ sealed class Game
 			async Task<Role?> vote()
 			{
 				Dictionary<Role, Role> votes = new();
-				foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,}))
+				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead))
 				{
 					var aliveRoles = roles.Where(static r => !r.dead).ToList();
 					var target = await role.Select("请选择你要杀死的玩家", aliveRoles.Where(static r => !r.dead).ToList());
@@ -230,7 +231,7 @@ sealed class Game
 				}
 				if(votes.Values.Distinct().Count() == 1) return votes.Values.First();
 				var message = string.Join(", ", votes.Select(static kv => $"{kv.Key.Name}选择了{kv.Value.Name}"));
-				foreach(var role in roles.Where(static r => r is {dead: false, roleType: RoleType.Wolf,})) role.Notify(message);
+				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify(message);
 				return null;
 			}
 		}
