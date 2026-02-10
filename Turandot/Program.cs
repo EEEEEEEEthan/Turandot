@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Turandot;
@@ -71,6 +70,7 @@ sealed class Game
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
 		{
+			if(options.Count <= 0) throw new ArgumentException("选项不能为空", nameof(options));
 			var availableOptions = string.Join("，", options.Select(static r => r.Name));
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}({availableOptions})");
 			const string toolName = "select_target";
@@ -128,26 +128,42 @@ sealed class Game
 		var originIndex = new Random().Next(0, roles.Count);
 		holder.Say($"请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍");
 		await discuss(originIndex, "请发言");
-		holder.Say("天黑请闭眼");
-		var killed = await kill();
-		if(killed is null)
+		while(true)
 		{
-			holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
-			await discuss(originIndex, "请发言");
-		}
-		else
-		{
-			killed.dead = true;
-			holder.Say($"天亮了,昨晚{killed.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
-			await discuss(roles.IndexOf(killed) + 1, "请依次发言.每人只有一次发言机会");
-			var executed = await voteExecute();
-			if(executed is {})
+			holder.Say("天黑请闭眼");
+			var killed = await kill();
+			if(killed is null)
 			{
-				executed.dead = true;
-				holder.Say($"{executed.Name}被投票处决");
-				var lastWords = await executed.Prompt("请发表遗言");
-				executed.Say(lastWords);
+				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
+				await discuss(originIndex, "请发言");
 			}
+			else
+			{
+				killed.dead = true;
+				holder.Say($"天亮了,昨晚{killed.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
+				await discuss(roles.IndexOf(killed) + 1, "请依次发言.每人只有一次发言机会");
+				var executed = await voteExecute();
+				if(executed is {})
+				{
+					executed.dead = true;
+					holder.Say($"{executed.Name}被投票处决");
+					var lastWords = await executed.Prompt("请发表遗言");
+					executed.Say(lastWords);
+				}
+			}
+			var wolfCount = roles.Count(static r => r is {roleType: RoleType.Wolf, dead: false,});
+			var villagerCount = roles.Count(static r => r is {roleType: RoleType.Villager, dead: false,});
+			if(wolfCount >= villagerCount)
+			{
+				holder.Say("游戏结束, 狼人胜利");
+				return;
+			}
+			if(wolfCount <= 0)
+			{
+				holder.Say("游戏结束, 村民胜利");
+				return;
+			}
+			holder.Say("游戏继续");
 		}
 		return;
 		async Task<Role?> voteExecute()
