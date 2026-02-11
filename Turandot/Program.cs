@@ -31,7 +31,7 @@ sealed class Game
 				if(File.Exists($"{name}_memory.txt")) return File.ReadAllText($"{name}_memory.txt");
 				return"";
 			}
-			set => File.WriteAllText("{name}_memory.txt", value);
+			set => File.WriteAllText($"{name}_memory.txt", value);
 		}
 	}
 	abstract class Role(Game game, Player player)
@@ -324,9 +324,11 @@ sealed class Game
 	public async Task PlayAsync()
 	{
 		var originIndex = new Random().Next(0, roles.Count);
+		var nightIndex = 0;
 		while(true)
 		{
-			holder.Say("天黑请闭眼");
+			++nightIndex;
+			holder.Say($"第{nightIndex}夜.天黑请闭眼");
 			var wolfTarget = await wolfTurn();
 			var (saved, poisoned) = await witchTurn(wolfTarget);
 			await seerTurn();
@@ -343,8 +345,8 @@ sealed class Game
 			}
 			if(deaths.Count == 0)
 			{
-				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
-				await discuss(originIndex, "请发言");
+				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情.");
+				await discuss(originIndex, "请发言讨论.因为平安无事,本轮不投票处决");
 			}
 			else
 			{
@@ -375,7 +377,7 @@ sealed class Game
 		}
 		holder.Say("现在公布身份");
 		foreach(var role in roles) holder.Say($"{role.Name}是{role.RoleText}");
-		foreach(var role in roles) role.player.Memory = await role.RawPrompt($"你以前的心得:{role.player.Memory}\n现在请你根据本局的情况更新你的心得。控制在100行以内.");
+		foreach(var role in roles) role.player.Memory = await role.RawPrompt($"你以前的心得:{role.player.Memory}\n现在请你根据本局的情况更新你的心得。控制在300字以内.");
 		return;
 		async Task<Role?> voteExecute()
 		{
@@ -408,7 +410,7 @@ sealed class Game
 			holder.Say("狼人请睁眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
 			Role? target = null;
-			for(var i = 0; i < roles.Count; i++)
+			for(var i = 0; i < 3; i++)
 			{
 				target = await vote();
 				if(target is null)
