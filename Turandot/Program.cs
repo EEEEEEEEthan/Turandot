@@ -58,6 +58,14 @@ sealed class Game
 			using(new ConsoleColorScope(ConsoleColor.DarkGray))
 				Console.WriteLine(message);
 		}
+		public Task<string> RawPrompt(string prompt)
+		{
+			prompt = $"你是{Name}({RoleText})\n{prompt}";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
+			var copied = new List<ChatMessageContent>(context)
+				{new(AuthorRole.User, $"{prompt}"),};
+			return LLM.SendAsync(game.credentials, copied);
+		}
 		public Task<string> Prompt(string prompt)
 		{
 			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
@@ -67,7 +75,7 @@ sealed class Game
 				你的性格:{player.personalityPrompts}.
 				你记得：{player.Memory}.
 				你们在玩狼人杀.
-				{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容)
+				{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化且简短一点.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容)
 				""";
 			var copied = new List<ChatMessageContent>(context)
 				{new(AuthorRole.User, $"{prompt}"),};
@@ -355,18 +363,22 @@ sealed class Game
 					if(wolfCount >= villagerCount)
 					{
 						holder.Say("游戏结束, 狼人胜利");
-						return;
+						break;
 					}
 					if(wolfCount <= 0)
 					{
 						holder.Say("游戏结束, 村民胜利");
-						return;
+						break;
 					}
 					var lastWords = await executed.Prompt("请发表遗言");
 					executed.Say(lastWords);
 				}
 			}
 		}
+		holder.Say("现在公布身份");
+		foreach(var role in roles) holder.Say($"{role.Name}是{role.RoleText}");
+		foreach(var role in roles) role.player.Memory = await role.RawPrompt($"你以前的心得:{role.player.Memory}\n现在请你根据本局的情况更新你的心得。控制在100行以内.");
+		return;
 		async Task<Role?> voteExecute()
 		{
 			var alive = roles.Where(static r => !r.dead).ToList();
