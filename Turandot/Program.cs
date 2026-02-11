@@ -161,9 +161,9 @@ sealed class Game
 		public async Task<bool> TrySave(Role killed)
 		{
 			if(!hasSavePotion) return false;
-			var prompt = $"{killed.Name}死了。请决定是否使用救药救活TA。救则返回true，不救则返回false";
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[救/不救]");
 			const string toolName = "witch_save";
+			var prompt = $"{killed.Name}死了。请决定是否使用救药救活TA(使用{toolName}工具)";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[救/不救]");
 			bool? saved = null;
 			while(saved is null)
 			{
@@ -215,13 +215,11 @@ sealed class Game
 			new("ziham", "首轮爱起跳或反水,用激进发言带风向;狼时敢对刚真预言家,好人时也常先手压人"),
 			new("luna", "前几轮几乎不发言,靠听票型和发言细节记笔记;轮次关键时才长发言,一击必中"),
 			new("mike", "被点或站错队时语气会抖、重复用词;好人被冤容易情绪化,狼被踩时反而话多辩解"),
-			/*
 			new("alice", "发言按时间线盘谁跟谁、谁保谁,爱画身份链;信逻辑不信状态,容易忽略演技型玩家"),
 			new("leo", "听完强势方发言容易改票;谁语气肯定就跟谁,容易被狼队煽动或好人带队带着走"),
 			new("nina", "常用'我不太会玩''我搞不清'降低存在感,实则抿人准、刀法稳;装懵时细节会露馅"),
 			new("ryan", "故意说反逻辑、假站边或模糊立场,让全场混乱;狼时搅局抗推,好人时也爱开玩笑干扰判断"),
 			new("sara", "拿预言家必报查验、要警徽、强势归票;好人时见不公就开怼,容易成为狼队首刀或抗推目标"),
-			*/
 		];
 		Config config = players.Count switch
 		{
