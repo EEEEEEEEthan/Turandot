@@ -429,32 +429,43 @@ sealed class Game
 			var wolves = roles.OfType<WolfRole>().Where(static r => !r.dead).ToList();
 			foreach(var role in wolves) role.Notify("你睁开了眼");
 			Role? target = null;
-			var turns = wolves.Count + 2;
-			for(var i = 0; i < turns; i++)
+			for(var round = 0; round < 3; round++)
 			{
-				target = await vote();
-				if(target is null && i < turns - 1)
+				target = round == 0? await voteTogether() : await voteSequential();
+				if(target is {}) break;
+				if(round < 2)
 					holder.Say("狼人请统一意见.如果无法达成一致,则本轮无人死亡");
-				else
-					break;
 			}
+			foreach(var role in wolves) role.Notify(target is null? "本轮无人死亡" : $"本轮你们选择了{target.Name}");
 			holder.Say("狼人请闭眼");
 			foreach(var role in wolves) role.Notify("你闭上了眼");
 			return target;
-			async Task<Role?> vote()
+			async Task<Role?> voteTogether()
 			{
 				var aliveRoles = roles.Where(static r => !r.dead).ToList();
 				var targets = await Task.WhenAll(wolves.Select(w => w.Select("请选择你要杀死的玩家", aliveRoles)));
-				Dictionary<Role, Role> votes = new();
-				for(var i = 0; i < wolves.Count; i++) votes[wolves[i]] = targets[i];
-				// 按被选角色计票，唯一得票最多者才刀人，否则跳过
+				return getUnifiedTarget(targets);
+			}
+			async Task<Role?> voteSequential()
+			{
+				var aliveRoles = roles.Where(static r => !r.dead).ToList();
+				var targets = new List<Role>();
+				for(var i = 0; i < wolves.Count; i++)
+				{
+					var wolf = wolves[i];
+					var target = await wolf.Select("请选择你要杀死的玩家", aliveRoles);
+					targets.Add(target);
+					for(var j = 0; j < wolves.Count; j++)
+						wolves[j].Notify($"{wolf.Name}选择了{target.Name}");
+				}
+				return getUnifiedTarget(targets);
+			}
+			static Role? getUnifiedTarget(IEnumerable<Role> targets)
+			{
 				var byTarget = targets.GroupBy(static t => t).ToDictionary(static g => g.Key, static g => g.Count());
 				var maxCount = byTarget.Values.Max();
 				var top = byTarget.Where(kv => kv.Value == maxCount).ToList();
-				if(top.Count == 1) return top[0].Key;
-				var message = string.Join(", ", votes.Select(static kv => $"{kv.Key.Name}选择了{kv.Value.Name}"));
-				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify(message);
-				return null;
+				return top.Count == 1? top[0].Key : null;
 			}
 		}
 		async Task<(bool saved, Role? poisoned)> witchTurn(Role? killed)
