@@ -54,7 +54,7 @@ sealed class Game
 			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
 			var copied = new List<ChatMessageContent>(context)
-				{new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人.你的性格:{player.personalityPrompts})"),};
+				{new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容.你的性格:{player.personalityPrompts})"),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
@@ -118,7 +118,7 @@ sealed class Game
 		public override string RoleText => "女巫";
 		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家，一瓶毒药可毒死一名玩家(各整局只能用一次)";
 		/// <summary>女巫决定是否用救药救活被刀玩家，返回 true 表示使用救药</summary>
-		public async Task<bool> TrySaveAsync(Role killed)
+		public async Task<bool> TrySave(Role killed)
 		{
 			if(!hasSavePotion) return false;
 			var prompt = $"昨晚{killed.Name}被狼人杀死。请决定是否使用救药救活TA。救则返回true，不救则返回false";
@@ -130,11 +130,13 @@ sealed class Game
 				var tool = new LLM.ToolSpec(
 					toolName,
 					$"选择是否使用救药(你的性格:{player.personalityPrompts})",
-					[new("use_save", "是否使用救药救活，true=救/false=不救", typeof(bool), true),],
+					[new("use_save", "是否使用救药救活，必须填`救`或`不救`", typeof(string), true),],
 					(payload, _) =>
 					{
-						saved = (bool)payload["use_save"]!;
-						return Task.FromResult("已记录你的选择");
+						var v = (payload["use_save"]?.ToString() ?? "").Trim();
+						if(v is "救" or "true" or "yes" or "1") { saved = true; return Task.FromResult("已记录"); }
+						if(v is "不救" or "false" or "no" or "0") { saved = false; return Task.FromResult("已记录"); }
+						return Task.FromResult("无效。请填救或不救");
 					});
 				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
@@ -144,7 +146,7 @@ sealed class Game
 			return saved == true;
 		}
 		/// <summary>女巫决定是否用毒药毒死一名玩家，返回被毒目标或 null</summary>
-		public async Task<Role?> TryPoisonAsync(List<Role> alive)
+		public async Task<Role?> TryPoison(List<Role> alive)
 		{
 			if(!hasPoisonPotion || alive.Count <= 0) return null;
 			var prompt = "你是否使用毒药毒死一名玩家？毒则返回true，不毒则返回false";
@@ -156,11 +158,13 @@ sealed class Game
 				var tool = new LLM.ToolSpec(
 					toolName,
 					$"选择是否使用毒药(你的性格:{player.personalityPrompts})",
-					[new("use_poison", "是否使用毒药，true=毒/false=不毒", typeof(bool), true),],
+					[new("use_poison", "是否使用毒药，必须填`毒`或`不毒`", typeof(string), true),],
 					(payload, _) =>
 					{
-						usePoison = (bool)payload["use_poison"]!;
-						return Task.FromResult("已记录你的选择");
+						var v = (payload["use_poison"]?.ToString() ?? "").Trim();
+						if(v is "毒" or "true" or "yes" or "1") { usePoison = true; return Task.FromResult("已记录"); }
+						if(v is "不毒" or "false" or "no" or "0") { usePoison = false; return Task.FromResult("已记录"); }
+						return Task.FromResult("无效。请填毒或不毒");
 					});
 				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
@@ -186,11 +190,13 @@ sealed class Game
 			new("ziham", "首轮爱起跳或反水,用激进发言带风向;狼时敢对刚真预言家,好人时也常先手压人"),
 			new("luna", "前几轮几乎不发言,靠听票型和发言细节记笔记;轮次关键时才长发言,一击必中"),
 			new("mike", "被点或站错队时语气会抖、重复用词;好人被冤容易情绪化,狼被踩时反而话多辩解"),
+			/*
 			new("alice", "发言按时间线盘谁跟谁、谁保谁,爱画身份链;信逻辑不信状态,容易忽略演技型玩家"),
 			new("leo", "听完强势方发言容易改票;谁语气肯定就跟谁,容易被狼队煽动或好人带队带着走"),
 			new("nina", "常用'我不太会玩''我搞不清'降低存在感,实则抿人准、刀法稳;装懵时细节会露馅"),
 			new("ryan", "故意说反逻辑、假站边或模糊立场,让全场混乱;狼时搅局抗推,好人时也爱开玩笑干扰判断"),
 			new("sara", "拿预言家必报查验、要警徽、强势归票;好人时见不公就开怼,容易成为狼队首刀或抗推目标"),
+			*/
 		];
 		Config config = players.Count switch
 		{
@@ -342,7 +348,7 @@ sealed class Game
 			{
 				var role = roles[(firstIndex + i) % roles.Count];
 				if(role.dead) continue;
-				var result = await role.Prompt(prompt + "\n不要说关于`听到声音`等内容");
+				var result = await role.Prompt(prompt);
 				role.Say(result);
 			}
 		}
@@ -388,14 +394,14 @@ sealed class Game
 			var saved = false;
 			if(killed != null)
 				foreach(var witch in witches)
-					if(await witch.TrySaveAsync(killed))
+					if(await witch.TrySave(killed))
 						saved = true;
 			holder.Say("你是否使用毒药毒死一名玩家？");
 			var alive = roles.Where(static r => !r.dead).ToList();
 			Role? poisoned = null;
 			foreach(var witch in witches)
 			{
-				var p = await witch.TryPoisonAsync(alive);
+				var p = await witch.TryPoison(alive);
 				if(p is {}) poisoned = p;
 			}
 			foreach(var witch in witches) witch.Notify("你闭上了眼");
