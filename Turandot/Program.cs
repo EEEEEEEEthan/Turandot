@@ -439,7 +439,11 @@ sealed class Game
 				var targets = await Task.WhenAll(wolves.Select(w => w.Select("请选择你要杀死的玩家", aliveRoles)));
 				Dictionary<Role, Role> votes = new();
 				for(var i = 0; i < wolves.Count; i++) votes[wolves[i]] = targets[i];
-				if(votes.Values.Distinct().Count() == 1) return votes.Values.First();
+				// 按被选角色计票，唯一得票最多者才刀人，否则跳过
+				var byTarget = targets.GroupBy(static t => t).ToDictionary(static g => g.Key, static g => g.Count());
+				var maxCount = byTarget.Values.Max();
+				var top = byTarget.Where(kv => kv.Value == maxCount).ToList();
+				if(top.Count == 1) return top[0].Key;
 				var message = string.Join(", ", votes.Select(static kv => $"{kv.Key.Name}选择了{kv.Value.Name}"));
 				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify(message);
 				return null;
