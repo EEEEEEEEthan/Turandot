@@ -118,7 +118,7 @@ sealed class Game
 			}
 			if(skipped)
 				using(new ConsoleColorScope(ConsoleColor.DarkGray))
-					Console.WriteLine($"[{Name}]选择{skipOption}");
+					Console.WriteLine($"[{Name}]跳过");
 			else if(target is {})
 				using(new ConsoleColorScope(ConsoleColor.DarkGray))
 					Console.WriteLine($"[{Name}]选择了{target.Name}");
@@ -161,7 +161,7 @@ sealed class Game
 		public async Task<bool> TrySave(Role killed)
 		{
 			if(!hasSavePotion) return false;
-			var prompt = $"昨晚{killed.Name}被狼人杀死。请决定是否使用救药救活TA。救则返回true，不救则返回false";
+			var prompt = $"{killed.Name}死了。请决定是否使用救药救活TA。救则返回true，不救则返回false";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[救/不救]");
 			const string toolName = "witch_save";
 			bool? saved = null;
@@ -200,7 +200,6 @@ sealed class Game
 			var target = await SelectTargetOrSkip("请选择你要毒死的玩家或者跳过", options);
 			if(target is null) return null;
 			HasPoisonPotion = false;
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择毒{target.Name}");
 			return target;
 		}
 	}
@@ -415,21 +414,20 @@ sealed class Game
 			if(witches.Count == 0) return(false, null);
 			holder.Say("女巫请睁眼");
 			foreach(var witch in witches) witch.Notify("你睁开了眼");
-			holder.Say("昨晚TA被狼人杀死。你是否使用救药救活TA？");
-			foreach(var witch in witches) holder.Whisper(witch, killed is null? "昨晚其实没有人死.但是我必须播报" : $"昨晚{killed.Name}被狼人杀死。你是否使用救药救活TA？");
+			foreach(var witch in witches) holder.Whisper(witch, killed is null? "没有人死" : $"{killed.Name}被狼人杀死。你是否使用救药救活TA？");
 			var saved = false;
 			if(killed != null)
 				foreach(var witch in witches)
 					if(await witch.TrySave(killed))
 						saved = true;
 			var alive = roles.Where(static r => !r.dead).ToList();
-			holder.Say("你想要毒死谁?");
 			Role? poisoned = null;
 			foreach(var witch in witches)
 				if(!witch.HasPoisonPotion)
 					holder.Whisper(witch, "你没有毒药了");
 				else
 				{
+					holder.Whisper(witch, "你想毒死谁");
 					var p = await witch.TryPoison(alive);
 					if(p is {}) poisoned = p;
 				}
