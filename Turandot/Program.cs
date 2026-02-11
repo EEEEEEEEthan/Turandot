@@ -255,7 +255,15 @@ sealed class Game
 		holder.Say($"在坐玩家有{string.Join("，", roles.Select(static r => r.Name))}");
 		holder.Say($"本局配置: {config.wolfCount}个狼人, {config.seerCount}个预言家, {config.witchCount}个女巫, {config.villagerCount}个村民");
 		foreach(var role in roles)
-			role.Notify($"你的身份是{role.RoleText}。你的目标是{role.Goal}");
+		{
+			var text = $"你的身份是{role.RoleText}。你的目标是{role.Goal}";
+			if(role is WolfRole)
+			{
+				var wolfNames = string.Join(", ", roles.Where(r => r != role && r is WolfRole).Select(static r => r.Name));
+				text += ". " + wolfNames + " 和你一样是狼人";
+			}
+			role.Notify(text);
+		}
 		return;
 		void addWolf()
 		{
@@ -284,20 +292,8 @@ sealed class Game
 	}
 	public async Task PlayAsync()
 	{
-		holder.Say("天黑请闭眼");
-		foreach(var role in roles) role.Notify("你闭上了眼");
-		holder.Say("狼人请睁眼互相确认身份.本轮仅确认身份,不杀人");
-		foreach(var role in roles.OfType<WolfRole>())
-		{
-			var wolves = string.Join(", ", roles.OfType<WolfRole>().Where(r => r != role).Select(static r => r.Name));
-			role.Notify($"你睁开眼,发现{wolves}和你一样也是狼人");
-		}
-		holder.Say("狼人请闭眼");
-		foreach(var role in roles.OfType<WolfRole>()) role.Notify("你闭上了眼");
-		holder.Say("天亮了.");
-		foreach(var role in roles) role.Notify("你睁开了眼");
 		var originIndex = new Random().Next(0, roles.Count);
-		holder.Say($"刚才的回合仅是互相确认身份,按照规则不会发生任何事情.狼人没有杀人,预言家没有验身份.现在请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
+		holder.Say($"游戏开始了.请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
 		await discuss(originIndex, "请发言");
 		while(true)
 		{
