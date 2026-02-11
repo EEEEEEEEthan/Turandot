@@ -27,7 +27,7 @@ sealed class Game
 	}
 	abstract class Role(Game game, Player player)
 	{
-		public readonly Game game;
+		public readonly Game game = game;
 		public readonly Player player = player;
 		public bool dead;
 		protected readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
@@ -356,6 +356,8 @@ sealed class Game
 				target = await vote();
 				if(target is null)
 					holder.Say("狼人请统一意见.如果无法达成一致,则本轮无人死亡");
+				else
+					break;
 			}
 			holder.Say("狼人请闭眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你闭上了眼");
