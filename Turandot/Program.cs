@@ -27,7 +27,7 @@ sealed class Game
 	}
 	abstract class Role(Game game, Player player)
 	{
-		public readonly Game game = game;
+		protected readonly Game game = game;
 		public readonly Player player = player;
 		public bool dead;
 		protected readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
@@ -342,7 +342,7 @@ sealed class Game
 			{
 				var role = roles[(firstIndex + i) % roles.Count];
 				if(role.dead) continue;
-				var result = await role.Prompt(prompt);
+				var result = await role.Prompt(prompt + "\n不要说关于`听到声音`等内容");
 				role.Say(result);
 			}
 		}
