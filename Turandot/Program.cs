@@ -52,7 +52,8 @@ sealed class Game
 		{
 			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
-			var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人.你的性格:{player.personalityPrompts})"),};
+			var copied = new List<ChatMessageContent>(context)
+				{new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人.你的性格:{player.personalityPrompts})"),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
@@ -111,9 +112,9 @@ sealed class Game
 	}
 	sealed class WitchRole(Game game, Player player): Role(game, player)
 	{
+		bool hasSavePotion = true;
 		public override string RoleText => "女巫";
 		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家(整局只能用一次)";
-		bool hasSavePotion = true;
 		/// <summary>女巫决定是否用救药救活被刀玩家，返回 true 表示使用救药</summary>
 		public Task<bool> TrySaveAsync(Role killed)
 		{
@@ -137,11 +138,11 @@ sealed class Game
 						saved = (bool)payload["use_save"]!;
 						return Task.FromResult("已记录你的选择");
 					});
-				var copied = new List<ChatMessageContent>(context) { new(AuthorRole.User, prompt), };
+				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
 			}
 			if(saved == true) hasSavePotion = false;
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择{(saved == true ? "救" : "不救")}");
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择{(saved == true? "救" : "不救")}");
 			return saved == true;
 		}
 	}
@@ -244,19 +245,19 @@ sealed class Game
 		while(true)
 		{
 			holder.Say("天黑请闭眼");
-			var killed = await wolfTurn();
-			var saved = killed is { } k && await witchTurn(k);
+			var wolfTarget = await wolfTurn();
+			var saved = wolfTarget != null && await witchTurn(wolfTarget);
 			await seerTurn();
-			if(killed is null || saved)
+			if(wolfTarget is null || saved)
 			{
 				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
 				await discuss(originIndex, "请发言");
 			}
 			else
 			{
-				killed!.dead = true;
-				holder.Say($"天亮了,昨晚{killed.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
-				await discuss(roles.IndexOf(killed) + 1, "请依次发言.每人只有一次发言机会");
+				wolfTarget.dead = true;
+				holder.Say($"天亮了,昨晚{wolfTarget.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
+				await discuss(roles.IndexOf(wolfTarget) + 1, "请依次发言.每人只有一次发言机会");
 				var executed = await voteExecute();
 				if(executed is {})
 				{
@@ -316,10 +317,7 @@ sealed class Game
 				if(target is null)
 					holder.Say("狼人请统一意见.如果无法达成一致,则本轮无人死亡");
 				else
-				{
-					target.dead = true;
 					return target;
-				}
 			}
 			holder.Say("狼人请闭眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你闭上了眼");
@@ -339,21 +337,21 @@ sealed class Game
 				return null;
 			}
 		}
-		async Task<bool> witchTurn(Role killed)
+		async Task<bool> witchTurn(Role? killed)
 		{
 			var witches = roles.OfType<WitchRole>().Where(static r => !r.dead).ToList();
 			if(witches.Count == 0) return false;
 			holder.Say("女巫请睁眼");
 			foreach(var witch in witches) witch.Notify("你睁开了眼");
-			foreach(var witch in witches) holder.Whisper(witch, $"昨晚{killed.Name}被狼人杀死。你是否使用救药救活TA？");
+			holder.Say("昨晚TA被狼人杀死。你是否使用救药救活TA？");
+			foreach(var witch in witches) holder.Whisper(witch, killed is null? "昨晚没有人死" : $"昨晚{killed.Name}被狼人杀死。你是否使用救药救活TA？");
 			var saved = false;
-			foreach(var witch in witches)
-			{
-				if(await witch.TrySaveAsync(killed)) saved = true;
-			}
+			if(killed != null)
+				foreach(var witch in witches)
+					if(await witch.TrySaveAsync(killed))
+						saved = true;
 			foreach(var witch in witches) witch.Notify("你闭上了眼");
 			holder.Say("女巫请闭眼");
-			if(saved) holder.Say($"女巫使用救药救活了{killed.Name}");
 			return saved;
 		}
 		async Task seerTurn()
