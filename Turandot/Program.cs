@@ -383,10 +383,10 @@ sealed class Game
 		{
 			var alive = roles.Where(static r => !r.dead).ToList();
 			if(alive.Count == 0) return null;
+			var targets = await Task.WhenAll(alive.Select(r => r.Select("请投票选出要处决的玩家", alive)));
 			var votes = new Dictionary<Role, int>();
-			foreach(var role in alive)
+			foreach(var target in targets)
 			{
-				var target = await role.Select("请投票选出要处决的玩家", alive);
 				votes.TryGetValue(target, out var count);
 				votes[target] = count + 1;
 			}
@@ -423,13 +423,11 @@ sealed class Game
 			return target;
 			async Task<Role?> vote()
 			{
+				var wolves = roles.OfType<WolfRole>().Where(static r => !r.dead).ToList();
+				var aliveRoles = roles.Where(static r => !r.dead).ToList();
+				var targets = await Task.WhenAll(wolves.Select(w => w.Select("请选择你要杀死的玩家", aliveRoles)));
 				Dictionary<Role, Role> votes = new();
-				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead))
-				{
-					var aliveRoles = roles.Where(static r => !r.dead).ToList();
-					var target = await role.Select("请选择你要杀死的玩家", aliveRoles.Where(static r => !r.dead).ToList());
-					votes[role] = target;
-				}
+				for(var i = 0; i < wolves.Count; i++) votes[wolves[i]] = targets[i];
 				if(votes.Values.Distinct().Count() == 1) return votes.Values.First();
 				var message = string.Join(", ", votes.Select(static kv => $"{kv.Key.Name}选择了{kv.Value.Name}"));
 				foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify(message);
