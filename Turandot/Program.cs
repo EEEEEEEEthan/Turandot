@@ -197,7 +197,7 @@ sealed class Game
 			if(!HasPoisonPotion || alive.Count <= 0) return null;
 			var options = alive.Where(r => r != this).ToList();
 			if(options.Count == 0) return null;
-			var target = await SelectTargetOrSkip("请选择你要毒死的玩家", options);
+			var target = await SelectTargetOrSkip("请选择你要毒死的玩家或者跳过", options);
 			if(target is null) return null;
 			HasPoisonPotion = false;
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择毒{target.Name}");
