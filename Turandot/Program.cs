@@ -229,13 +229,7 @@ sealed class Game
 			var options = alive.Where(r => r != this).ToList();
 			if(options.Count == 0) return null;
 			var target = await SelectTargetOrSkip("请选择你要毒死的玩家或者跳过", options);
-			if(target is null)
-			{
-				Notify("你选择了跳过");
-				return null;
-			}
 			HasPoisonPotion = false;
-			Notify($"你选择了毒死{target.Name}");
 			return target;
 		}
 	}
