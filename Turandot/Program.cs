@@ -73,8 +73,8 @@ sealed class Game
 			prompt =
 				$"""
 				你的性格:{player.personalityPrompts}.
-				你记得：{player.Memory}.
 				你们在玩狼人杀.
+				你以前对局的经验：{player.Memory}.
 				{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化且简短一点.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容)
 				""";
 			var copied = new List<ChatMessageContent>(context)
@@ -89,8 +89,8 @@ sealed class Game
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
 			prompt = $"""
 				你的性格:{player.personalityPrompts}.
-				你记得：{player.Memory}.
 				你们在玩狼人杀.
+				你以前对局的经验：{player.Memory}.
 				{prompt}
 				""";
 			const string toolName = "select_target";
@@ -325,6 +325,7 @@ sealed class Game
 	{
 		var originIndex = new Random().Next(0, roles.Count);
 		var nightIndex = 0;
+		syncRoles<WolfRole>();
 		while(true)
 		{
 			++nightIndex;
@@ -377,8 +378,18 @@ sealed class Game
 		}
 		holder.Say("现在公布身份");
 		foreach(var role in roles) holder.Say($"{role.Name}是{role.RoleText}");
-		foreach(var role in roles) role.player.Memory = await role.RawPrompt($"你以前的心得:{role.player.Memory}\n现在请你根据本局的情况更新你的心得。控制在300字以内.");
+		foreach(var role in roles) role.player.Memory = await role.RawPrompt($"""
+			你以前的攻略:{role.player.Memory}
+			现在请你根据本局的情况更新你的攻略。需要抽象一点，不要写具体的内容，例如“回合xxx”，“本局xxx”。字数控制在300字以内.
+			攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
+			""");
 		return;
+		void syncRoles<T>() where T: Role
+		{
+			var roles = this.roles.OfType<T>().ToList();
+			foreach(var role in roles)
+				role.Notify($"{string.Join(", ", roles.Where(r => r != role).Select(static r => r.Name))}和你一样也是{role.RoleText}");
+		}
 		async Task<Role?> voteExecute()
 		{
 			var alive = roles.Where(static r => !r.dead).ToList();
