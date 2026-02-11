@@ -111,7 +111,7 @@ sealed class Game
 				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
 			}
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择了{target.Name}");
+			Notify($"你选择了{target.Name}");
 			return target;
 		}
 		protected async Task<Role?> SelectTargetOrSkip(string prompt, List<Role> options)
@@ -149,10 +149,10 @@ sealed class Game
 			}
 			if(skipped)
 				using(new ConsoleColorScope(ConsoleColor.DarkGray))
-					Console.WriteLine($"[{Name}]跳过");
+					Notify("你跳过了选择");
 			else if(target is {})
 				using(new ConsoleColorScope(ConsoleColor.DarkGray))
-					Console.WriteLine($"[{Name}]选择了{target.Name}");
+					Notify($"你选择了{target.Name}");
 			return target;
 		}
 	}
@@ -194,7 +194,7 @@ sealed class Game
 			if(!hasSavePotion) return false;
 			const string toolName = "witch_save";
 			var prompt = $"{killed.Name}死了。请决定是否使用救药救活TA(使用{toolName}工具)";
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[救/不救]");
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
 			bool? saved = null;
 			while(saved is null)
 			{
@@ -220,7 +220,7 @@ sealed class Game
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
 			}
 			if(saved == true) hasSavePotion = false;
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择{(saved == true? "救" : "不救")}");
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Notify($"你选择了{(saved == true? "救" : "不救")}");
 			return saved == true;
 		}
 		public async Task<Role?> TryPoison(List<Role> alive)
@@ -229,8 +229,13 @@ sealed class Game
 			var options = alive.Where(r => r != this).ToList();
 			if(options.Count == 0) return null;
 			var target = await SelectTargetOrSkip("请选择你要毒死的玩家或者跳过", options);
-			if(target is null) return null;
+			if(target is null)
+			{
+				Notify("你选择了跳过");
+				return null;
+			}
 			HasPoisonPotion = false;
+			Notify($"你选择了毒死{target.Name}");
 			return target;
 		}
 	}
@@ -421,9 +426,10 @@ sealed class Game
 		async Task<Role?> wolfTurn()
 		{
 			holder.Say("狼人请睁眼");
-			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
+			var wolves = roles.OfType<WolfRole>().Where(static r => !r.dead).ToList();
+			foreach(var role in wolves) role.Notify("你睁开了眼");
 			Role? target = null;
-			const int turns = 3;
+			var turns = wolves.Count + 2;
 			for(var i = 0; i < turns; i++)
 			{
 				target = await vote();
@@ -433,11 +439,10 @@ sealed class Game
 					break;
 			}
 			holder.Say("狼人请闭眼");
-			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你闭上了眼");
+			foreach(var role in wolves) role.Notify("你闭上了眼");
 			return target;
 			async Task<Role?> vote()
 			{
-				var wolves = roles.OfType<WolfRole>().Where(static r => !r.dead).ToList();
 				var aliveRoles = roles.Where(static r => !r.dead).ToList();
 				var targets = await Task.WhenAll(wolves.Select(w => w.Select("请选择你要杀死的玩家", aliveRoles)));
 				Dictionary<Role, Role> votes = new();
