@@ -144,7 +144,7 @@ sealed class Game
 	sealed class VillagerRole(Game game, Player player): Role(game, player)
 	{
 		public override string RoleText => "村民";
-		public override string Goal => "你的目标是让狼人死光";
+		public override string Goal => "你的目标是保护特殊身份的人类,让狼人死光";
 	}
 	sealed class SeerRole(Game game, Player player): Role(game, player)
 	{
@@ -155,7 +155,7 @@ sealed class Game
 	{
 		bool hasSavePotion = true;
 		public override string RoleText => "女巫";
-		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家，一瓶毒药可毒死一名玩家(各整局只能用一次)";
+		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家，一瓶毒药可毒死一名玩家(各整局只能用一次,请谨慎使用)";
 		public bool HasPoisonPotion { get; private set; } = true;
 		/// <summary>女巫决定是否用救药救活被刀玩家，返回 true 表示使用救药</summary>
 		public async Task<bool> TrySave(Role killed)
@@ -294,7 +294,7 @@ sealed class Game
 	{
 		var originIndex = new Random().Next(0, roles.Count);
 		holder.Say($"游戏开始了.请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
-		await discuss(originIndex, "请发言");
+		await discuss(originIndex, "游戏刚开始,不要说谁的语气有问题");
 		while(true)
 		{
 			holder.Say("天黑请闭眼");
