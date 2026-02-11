@@ -27,9 +27,9 @@ sealed class Game
 	}
 	abstract class Role(Game game, Player player)
 	{
-		protected readonly Game game = game;
 		public readonly Player player = player;
 		public bool dead;
+		protected readonly Game game = game;
 		protected readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
 		public string Name => player.name;
 		public abstract string RoleText { get; }
@@ -84,6 +84,46 @@ sealed class Game
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择了{target.Name}");
 			return target;
 		}
+		protected async Task<Role?> SelectTargetOrSkip(string prompt, List<Role> options)
+		{
+			const string skipOption = "__SKIP__";
+			if(options.Count <= 0) throw new ArgumentException("选项不能为空", nameof(options));
+			var availableOptions = string.Join("，", options.Select(static r => r.Name)) + "，" + skipOption;
+			prompt = $"你是{Name}({RoleText}),现在选择目标.{prompt}";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
+			const string toolName = "select_target_or_skip";
+			Role? target = null;
+			var skipped = false;
+			while(target is null && !skipped)
+			{
+				var tool = new LLM.ToolSpec(
+					toolName,
+					$"选择玩家或`{skipOption}`跳过(你的性格:{player.personalityPrompts})",
+					[new("target", $"从[{availableOptions}]中选一个", typeof(string), true),],
+					(payload, _) =>
+					{
+						var t = (payload["target"]?.ToString() ?? "").Trim();
+						if(t == skipOption)
+						{
+							skipped = true;
+							return Task.FromResult("已记录");
+						}
+						var r = options.FirstOrDefault(x => x.Name == t);
+						if(r is null) return Task.FromResult($"无效。请选{availableOptions}");
+						target = r;
+						return Task.FromResult("已记录");
+					});
+				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
+				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
+			}
+			if(skipped)
+				using(new ConsoleColorScope(ConsoleColor.DarkGray))
+					Console.WriteLine($"[{Name}]选择{skipOption}");
+			else if(target is {})
+				using(new ConsoleColorScope(ConsoleColor.DarkGray))
+					Console.WriteLine($"[{Name}]选择了{target.Name}");
+			return target;
+		}
 	}
 	sealed class HolderRole(Game game, Player player): Role(game, player)
 	{
@@ -114,9 +154,9 @@ sealed class Game
 	sealed class WitchRole(Game game, Player player): Role(game, player)
 	{
 		bool hasSavePotion = true;
-		bool hasPoisonPotion = true;
 		public override string RoleText => "女巫";
 		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家，一瓶毒药可毒死一名玩家(各整局只能用一次)";
+		public bool HasPoisonPotion { get; private set; } = true;
 		/// <summary>女巫决定是否用救药救活被刀玩家，返回 true 表示使用救药</summary>
 		public async Task<bool> TrySave(Role killed)
 		{
@@ -130,13 +170,20 @@ sealed class Game
 				var tool = new LLM.ToolSpec(
 					toolName,
 					$"选择是否使用救药(你的性格:{player.personalityPrompts})",
-					[new("use_save", "是否使用救药救活，必须填`救`或`不救`", typeof(string), true),],
+					[new("use_save", "是否使用救药救活，必须填`yes`或`no`", typeof(string), true),],
 					(payload, _) =>
 					{
 						var v = (payload["use_save"]?.ToString() ?? "").Trim();
-						if(v is "救" or "true" or "yes" or "1") { saved = true; return Task.FromResult("已记录"); }
-						if(v is "不救" or "false" or "no" or "0") { saved = false; return Task.FromResult("已记录"); }
-						return Task.FromResult("无效。请填救或不救");
+						switch(v)
+						{
+							case"yes":
+								saved = true;
+								return Task.FromResult("已记录");
+							case"no":
+								saved = false;
+								return Task.FromResult("已记录");
+							default: return Task.FromResult("无效。请填救或不救");
+						}
 					});
 				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
 				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
@@ -145,35 +192,14 @@ sealed class Game
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择{(saved == true? "救" : "不救")}");
 			return saved == true;
 		}
-		/// <summary>女巫决定是否用毒药毒死一名玩家，返回被毒目标或 null</summary>
 		public async Task<Role?> TryPoison(List<Role> alive)
 		{
-			if(!hasPoisonPotion || alive.Count <= 0) return null;
-			var prompt = "你是否使用毒药毒死一名玩家？毒则返回true，不毒则返回false";
-			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[毒/不毒]");
-			const string toolName = "witch_poison";
-			bool? usePoison = null;
-			while(usePoison is null)
-			{
-				var tool = new LLM.ToolSpec(
-					toolName,
-					$"选择是否使用毒药(你的性格:{player.personalityPrompts})",
-					[new("use_poison", "是否使用毒药，必须填`毒`或`不毒`", typeof(string), true),],
-					(payload, _) =>
-					{
-						var v = (payload["use_poison"]?.ToString() ?? "").Trim();
-						if(v is "毒" or "true" or "yes" or "1") { usePoison = true; return Task.FromResult("已记录"); }
-						if(v is "不毒" or "false" or "no" or "0") { usePoison = false; return Task.FromResult("已记录"); }
-						return Task.FromResult("无效。请填毒或不毒");
-					});
-				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
-				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
-			}
-			if(usePoison != true) return null;
-			var options = alive.Where(r => r != this).ToList(); // 不能毒自己
+			if(!HasPoisonPotion || alive.Count <= 0) return null;
+			var options = alive.Where(r => r != this).ToList();
 			if(options.Count == 0) return null;
-			var target = await Select("请选择你要毒死的玩家", options);
-			hasPoisonPotion = false;
+			var target = await SelectTargetOrSkip("请选择你要毒死的玩家", options);
+			if(target is null) return null;
+			HasPoisonPotion = false;
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择毒{target.Name}");
 			return target;
 		}
@@ -396,14 +422,17 @@ sealed class Game
 				foreach(var witch in witches)
 					if(await witch.TrySave(killed))
 						saved = true;
-			holder.Say("你是否使用毒药毒死一名玩家？");
 			var alive = roles.Where(static r => !r.dead).ToList();
+			holder.Say("你想要毒死谁?");
 			Role? poisoned = null;
 			foreach(var witch in witches)
-			{
-				var p = await witch.TryPoison(alive);
-				if(p is {}) poisoned = p;
-			}
+				if(!witch.HasPoisonPotion)
+					holder.Whisper(witch, "你没有毒药了");
+				else
+				{
+					var p = await witch.TryPoison(alive);
+					if(p is {}) poisoned = p;
+				}
 			foreach(var witch in witches) witch.Notify("你闭上了眼");
 			holder.Say("女巫请闭眼");
 			return(saved, poisoned);
