@@ -24,6 +24,15 @@ sealed class Game
 	{
 		public readonly string personalityPrompts = personalityPrompts;
 		public readonly string name = name;
+		public string Memory
+		{
+			get
+			{
+				if(File.Exists($"{name}_memory.txt")) return File.ReadAllText($"{name}_memory.txt");
+				return"";
+			}
+			set => File.WriteAllText("{name}_memory.txt", value);
+		}
 	}
 	abstract class Role(Game game, Player player)
 	{
@@ -53,8 +62,15 @@ sealed class Game
 		{
 			prompt = $"你是{Name}({RoleText}),请发言:{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}");
+			prompt =
+				$"""
+				你的性格:{player.personalityPrompts}.
+				你记得：{player.Memory}.
+				你们在玩狼人杀.
+				{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容)
+				""";
 			var copied = new List<ChatMessageContent>(context)
-				{new(AuthorRole.User, $"{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容.你的性格:{player.personalityPrompts})"),};
+				{new(AuthorRole.User, $"{prompt}"),};
 			return LLM.SendAsync(game.credentials, copied);
 		}
 		public async Task<Role> Select(string prompt, List<Role> options)
@@ -63,13 +79,19 @@ sealed class Game
 			var availableOptions = string.Join("，", options.Select(static r => r.Name));
 			prompt = $"你是{Name}({RoleText}),现在选择目标.{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
+			prompt = $"""
+				你的性格:{player.personalityPrompts}.
+				你记得：{player.Memory}.
+				你们在玩狼人杀.
+				{prompt}
+				""";
 			const string toolName = "select_target";
 			Role? target = null;
 			while(target is null)
 			{
 				var tool = new LLM.ToolSpec(
 					toolName,
-					$"选择一个玩家(你的性格:{player.personalityPrompts})",
+					"选择一个玩家",
 					[new("target", $"玩家名字,{availableOptions}中的一个", typeof(string), true),],
 					(payload, _) =>
 					{
@@ -91,6 +113,7 @@ sealed class Game
 			var availableOptions = string.Join("，", options.Select(static r => r.Name)) + "，" + skipOption;
 			prompt = $"你是{Name}({RoleText}),现在选择目标.{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
+			prompt = $"你的性格:{player.personalityPrompts}.\n你记得：{player.Memory}.\n你们在玩狼人杀.\n{prompt}";
 			const string toolName = "select_target_or_skip";
 			Role? target = null;
 			var skipped = false;
@@ -98,7 +121,7 @@ sealed class Game
 			{
 				var tool = new LLM.ToolSpec(
 					toolName,
-					$"选择玩家或`{skipOption}`跳过(你的性格:{player.personalityPrompts})",
+					$"选择玩家或`{skipOption}`跳过",
 					[new("target", $"从[{availableOptions}]中选一个", typeof(string), true),],
 					(payload, _) =>
 					{
@@ -327,23 +350,22 @@ sealed class Game
 				{
 					executed.dead = true;
 					holder.Say($"{executed.Name}被投票处决");
+					var wolfCount = roles.Count(static r => r is WolfRole {dead: false,});
+					var villagerCount = roles.Count(static r => !r.dead && r is not WolfRole);
+					if(wolfCount >= villagerCount)
+					{
+						holder.Say("游戏结束, 狼人胜利");
+						return;
+					}
+					if(wolfCount <= 0)
+					{
+						holder.Say("游戏结束, 村民胜利");
+						return;
+					}
 					var lastWords = await executed.Prompt("请发表遗言");
 					executed.Say(lastWords);
 				}
 			}
-			var wolfCount = roles.Count(static r => r is WolfRole {dead: false,});
-			var villagerCount = roles.Count(static r => !r.dead && r is not WolfRole);
-			if(wolfCount >= villagerCount)
-			{
-				holder.Say("游戏结束, 狼人胜利");
-				return;
-			}
-			if(wolfCount <= 0)
-			{
-				holder.Say("游戏结束, 村民胜利");
-				return;
-			}
-			holder.Say("游戏继续");
 		}
 		async Task<Role?> voteExecute()
 		{
