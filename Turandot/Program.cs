@@ -27,6 +27,7 @@ sealed class Game
 	}
 	abstract class Role(Game game, Player player)
 	{
+		public readonly Game game;
 		public readonly Player player = player;
 		public bool dead;
 		protected readonly List<ChatMessageContent> context = [new(AuthorRole.System, "你在玩狼人游戏.请随意说谎,表演.同时不要轻易相信任何人"),];
@@ -113,16 +114,13 @@ sealed class Game
 	sealed class WitchRole(Game game, Player player): Role(game, player)
 	{
 		bool hasSavePotion = true;
+		bool hasPoisonPotion = true;
 		public override string RoleText => "女巫";
-		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家(整局只能用一次)";
+		public override string Goal => "你的目标是让狼人死光。你有一瓶救药可救活当晚被狼刀的玩家，一瓶毒药可毒死一名玩家(各整局只能用一次)";
 		/// <summary>女巫决定是否用救药救活被刀玩家，返回 true 表示使用救药</summary>
-		public Task<bool> TrySaveAsync(Role killed)
+		public async Task<bool> TrySaveAsync(Role killed)
 		{
-			if(!hasSavePotion) return Task.FromResult(false);
-			return DecideSaveAsync(killed);
-		}
-		async Task<bool> DecideSaveAsync(Role killed)
-		{
+			if(!hasSavePotion) return false;
 			var prompt = $"昨晚{killed.Name}被狼人杀死。请决定是否使用救药救活TA。救则返回true，不救则返回false";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[救/不救]");
 			const string toolName = "witch_save";
@@ -144,6 +142,36 @@ sealed class Game
 			if(saved == true) hasSavePotion = false;
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择{(saved == true? "救" : "不救")}");
 			return saved == true;
+		}
+		/// <summary>女巫决定是否用毒药毒死一名玩家，返回被毒目标或 null</summary>
+		public async Task<Role?> TryPoisonAsync(List<Role> alive)
+		{
+			if(!hasPoisonPotion || alive.Count <= 0) return null;
+			var prompt = "你是否使用毒药毒死一名玩家？毒则返回true，不毒则返回false";
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[毒/不毒]");
+			const string toolName = "witch_poison";
+			bool? usePoison = null;
+			while(usePoison is null)
+			{
+				var tool = new LLM.ToolSpec(
+					toolName,
+					$"选择是否使用毒药(你的性格:{player.personalityPrompts})",
+					[new("use_poison", "是否使用毒药，true=毒/false=不毒", typeof(bool), true),],
+					(payload, _) =>
+					{
+						usePoison = (bool)payload["use_poison"]!;
+						return Task.FromResult("已记录你的选择");
+					});
+				var copied = new List<ChatMessageContent>(context) {new(AuthorRole.User, prompt),};
+				_ = await LLM.SendAsync(game.credentials, copied, [tool,], 0.6f);
+			}
+			if(usePoison != true) return null;
+			var options = alive.Where(r => r != this).ToList(); // 不能毒自己
+			if(options.Count == 0) return null;
+			var target = await Select("请选择你要毒死的玩家", options);
+			hasPoisonPotion = false;
+			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]选择毒{target.Name}");
+			return target;
 		}
 	}
 	readonly List<Role> roles = [];
@@ -246,18 +274,29 @@ sealed class Game
 		{
 			holder.Say("天黑请闭眼");
 			var wolfTarget = await wolfTurn();
-			var saved = wolfTarget != null && await witchTurn(wolfTarget);
+			var (saved, poisoned) = await witchTurn(wolfTarget);
 			await seerTurn();
-			if(wolfTarget is null || saved)
+			var deaths = new List<Role>();
+			if(wolfTarget is {} && !saved)
+			{
+				wolfTarget.dead = true;
+				deaths.Add(wolfTarget);
+			}
+			if(poisoned is {})
+			{
+				poisoned.dead = true;
+				deaths.Add(poisoned);
+			}
+			if(deaths.Count == 0)
 			{
 				holder.Say($"天亮了,昨晚平安无事,请从{roles[originIndex].player.name}开始发言,讨论昨晚发生的事情");
 				await discuss(originIndex, "请发言");
 			}
 			else
 			{
-				wolfTarget.dead = true;
-				holder.Say($"天亮了,昨晚{wolfTarget.Name}死了.请从死者下家开始发言,讨论昨晚发生的事情");
-				await discuss(roles.IndexOf(wolfTarget) + 1, "请依次发言.每人只有一次发言机会");
+				holder.Say($"天亮了,昨晚{string.Join("、", deaths.Select(static r => r.Name))}死了.请从死者下家开始发言,讨论昨晚发生的事情");
+				var firstDeathIdx = deaths.Min(d => roles.IndexOf(d));
+				await discuss((firstDeathIdx + 1) % roles.Count, "请依次发言.每人只有一次发言机会");
 				var executed = await voteExecute();
 				if(executed is {})
 				{
@@ -311,17 +350,16 @@ sealed class Game
 		{
 			holder.Say("狼人请睁眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
+			Role? target = null;
 			for(var i = 0; i < roles.Count; i++)
 			{
-				var target = await vote();
+				target = await vote();
 				if(target is null)
 					holder.Say("狼人请统一意见.如果无法达成一致,则本轮无人死亡");
-				else
-					return target;
 			}
 			holder.Say("狼人请闭眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你闭上了眼");
-			return null;
+			return target;
 			async Task<Role?> vote()
 			{
 				Dictionary<Role, Role> votes = new();
@@ -337,22 +375,30 @@ sealed class Game
 				return null;
 			}
 		}
-		async Task<bool> witchTurn(Role? killed)
+		async Task<(bool saved, Role? poisoned)> witchTurn(Role? killed)
 		{
 			var witches = roles.OfType<WitchRole>().Where(static r => !r.dead).ToList();
-			if(witches.Count == 0) return false;
+			if(witches.Count == 0) return(false, null);
 			holder.Say("女巫请睁眼");
 			foreach(var witch in witches) witch.Notify("你睁开了眼");
 			holder.Say("昨晚TA被狼人杀死。你是否使用救药救活TA？");
-			foreach(var witch in witches) holder.Whisper(witch, killed is null? "昨晚没有人死" : $"昨晚{killed.Name}被狼人杀死。你是否使用救药救活TA？");
+			foreach(var witch in witches) holder.Whisper(witch, killed is null? "昨晚其实没有人死.但是我必须播报" : $"昨晚{killed.Name}被狼人杀死。你是否使用救药救活TA？");
 			var saved = false;
 			if(killed != null)
 				foreach(var witch in witches)
 					if(await witch.TrySaveAsync(killed))
 						saved = true;
+			holder.Say("你是否使用毒药毒死一名玩家？");
+			var alive = roles.Where(static r => !r.dead).ToList();
+			Role? poisoned = null;
+			foreach(var witch in witches)
+			{
+				var p = await witch.TryPoisonAsync(alive);
+				if(p is {}) poisoned = p;
+			}
 			foreach(var witch in witches) witch.Notify("你闭上了眼");
 			holder.Say("女巫请闭眼");
-			return saved;
+			return(saved, poisoned);
 		}
 		async Task seerTurn()
 		{
