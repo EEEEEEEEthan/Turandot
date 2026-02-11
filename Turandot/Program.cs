@@ -324,8 +324,6 @@ sealed class Game
 	public async Task PlayAsync()
 	{
 		var originIndex = new Random().Next(0, roles.Count);
-		holder.Say($"游戏开始了.请从{roles[originIndex].player.name}开始发言,简单做一下自我介绍.");
-		await discuss(originIndex, "游戏刚开始,不要说谁的语气有问题");
 		while(true)
 		{
 			holder.Say("天黑请闭眼");
