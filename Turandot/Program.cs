@@ -378,11 +378,13 @@ sealed class Game
 		}
 		holder.Say("现在公布身份");
 		foreach(var role in roles) holder.Say($"{role.Name}是{role.RoleText}");
-		foreach(var role in roles) role.player.Memory = await role.RawPrompt($"""
-			你以前的攻略:{role.player.Memory}
-			现在请你根据本局的情况更新你的攻略。需要抽象一点，不要写具体的内容，例如“回合xxx”，“本局xxx”。字数控制在300字以内.
-			攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
-			""");
+		foreach(var role in roles)
+			role.player.Memory = await role.RawPrompt(
+				$"""
+				你以前的攻略:{role.player.Memory}
+				现在请你根据本局的情况更新你的攻略。需要抽象一点，不要写具体的内容，例如“回合xxx”，“本局xxx”。字数控制在300字以内.
+				攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
+				""");
 		return;
 		void syncRoles<T>() where T: Role
 		{
@@ -421,10 +423,11 @@ sealed class Game
 			holder.Say("狼人请睁眼");
 			foreach(var role in roles.OfType<WolfRole>().Where(static r => !r.dead)) role.Notify("你睁开了眼");
 			Role? target = null;
-			for(var i = 0; i < 3; i++)
+			const int turns = 3;
+			for(var i = 0; i < turns; i++)
 			{
 				target = await vote();
-				if(target is null)
+				if(target is null && i < turns - 1)
 					holder.Say("狼人请统一意见.如果无法达成一致,则本轮无人死亡");
 				else
 					break;
