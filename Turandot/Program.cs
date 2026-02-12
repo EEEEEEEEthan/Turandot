@@ -387,7 +387,7 @@ sealed class Game
 			role.Memory = await role.RawPrompt(
 				$"""
 				你以前玩{role.RoleText}角色的攻略:{role.Memory}
-				现在请你根据本局的情况更新你{role.RoleText}的攻略。需要抽象一点.可以记录其他玩家的特征.不要写具体的内容，例如“回合xxx”，“本局xxx”.字数控制在300字以内.
+				现在请你根据本局的情况更新你{role.RoleText}的攻略。需要抽象一点.不要写具体的内容，例如“回合xxx”，“本局xxx”.字数控制在300字以内.
 				攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
 				""");
 		return;
