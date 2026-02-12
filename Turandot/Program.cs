@@ -6,6 +6,7 @@ var apiKeyPath = Path.Combine(
 	Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
 	".apikey");
 var credentials = await LLM.EnsureApiKey(apiKeyPath);
+Console.WriteLine(apiKeyPath);
 var game = new Game(credentials);
 await game.PlayAsync();
 Console.WriteLine("按任意键退出");
@@ -395,6 +396,8 @@ sealed class Game
 			var alive = roles.Where(static r => !r.dead).ToList();
 			if(alive.Count == 0) return null;
 			var targets = await Task.WhenAll(alive.Select(r => r.Select("请投票选出要处决的玩家", alive)));
+			// 唱票：主持人宣布谁投了谁
+			holder.Say($"{string.Join("，", alive.Zip(targets, (voter, target) => $"{voter.Name}投了{target.Name}"))}");
 			var votes = new Dictionary<Role, int>();
 			foreach(var target in targets)
 			{
