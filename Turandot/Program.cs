@@ -53,10 +53,9 @@ sealed class Game
 		}
 		public void Notify(string message)
 		{
-			message = $"[{Name}]{message}";
-			context.Add(new(AuthorRole.System, message));
+			context.Add(new(AuthorRole.System, "[system]" + message));
 			using(new ConsoleColorScope(ConsoleColor.DarkGray))
-				Console.WriteLine(message);
+				Console.WriteLine($"[{Name}]" + message);
 		}
 		public Task<string> RawPrompt(string prompt)
 		{
