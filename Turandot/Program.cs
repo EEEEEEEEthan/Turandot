@@ -25,6 +25,12 @@ sealed class Game
 	{
 		public readonly string personalityPrompts = personalityPrompts;
 		public readonly string name = name;
+		public string Memory
+		{
+			get => File.Exists(MemoryFilePath) ? File.ReadAllText(MemoryFilePath) : "";
+			set => File.WriteAllText(MemoryFilePath, value);
+		}
+		string MemoryFilePath => $"{name}_Player_memory.txt";
 	}
 	abstract class Role(Game game, Player player)
 	{
@@ -76,6 +82,7 @@ sealed class Game
 				你的性格:{player.personalityPrompts}.
 				你们在玩狼人杀.
 				你以前玩{RoleText}角色的攻略:{Memory}.
+				你的通用攻略:{player.Memory}.
 				{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化且简短一点.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容)
 				""";
 			var copied = new List<ChatMessageContent>(context)
@@ -92,6 +99,7 @@ sealed class Game
 				你的性格:{player.personalityPrompts}.
 				你们在玩狼人杀.
 				你以前玩{RoleText}角色的攻略:{Memory}.
+				你的通用攻略:{player.Memory}.
 				{prompt}
 				""";
 			const string toolName = "select_target";
@@ -125,6 +133,7 @@ sealed class Game
 			prompt = $"""
 				你的性格:{player.personalityPrompts}.
 				你以前玩{RoleText}角色的攻略:{Memory}.
+				你的通用攻略:{player.Memory}.
 				你们在玩狼人杀.
 				{prompt}
 				""";
@@ -388,7 +397,13 @@ sealed class Game
 			role.Memory = await role.RawPrompt(
 				$"""
 				你以前玩{role.RoleText}角色的攻略:{role.Memory}
-				现在请你根据本局的情况更新你{role.RoleText}的攻略。需要抽象一点.不要写具体的内容，例如“回合xxx”，“本局xxx”.字数控制在300字以内.
+				现在请你根据本局的情况更新你{role.RoleText}的攻略。需要抽象一点.不要写具体的内容，例如“回合xxx”，“本局xxx”.字数控制在200字以内.
+				攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
+				""");
+			role.player.Memory = await role.RawPrompt(
+				$"""
+				你的通用攻略(任意角色都适用的攻略):{role.player.Memory}
+				根据本局情况更新的通用攻略.需要抽象一点,可以记录其他玩家的特征.不要写具体的细节，例如“回合xxx”，“本局xxx”。字数200字以内。
 				攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
 				""");
 		}));
