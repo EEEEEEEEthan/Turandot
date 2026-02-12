@@ -25,15 +25,6 @@ sealed class Game
 	{
 		public readonly string personalityPrompts = personalityPrompts;
 		public readonly string name = name;
-		public string Memory
-		{
-			get
-			{
-				if(File.Exists($"{name}_memory.txt")) return File.ReadAllText($"{name}_memory.txt");
-				return"";
-			}
-			set => File.WriteAllText($"{name}_memory.txt", value);
-		}
 	}
 	abstract class Role(Game game, Player player)
 	{
@@ -44,6 +35,16 @@ sealed class Game
 		public string Name => player.name;
 		public abstract string RoleText { get; }
 		public abstract string Goal { get; }
+		public string Memory
+		{
+			get
+			{
+				if(File.Exists(MemoryFilePath)) return File.ReadAllText(MemoryFilePath);
+				return"";
+			}
+			set => File.WriteAllText(MemoryFilePath, value);
+		}
+		string MemoryFilePath => $"{Name}_{GetType().Name}_memory.txt";
 		public void AppendMessage(ChatMessageContent content) { context.Add(content); }
 		public void Say(string message)
 		{
@@ -74,7 +75,7 @@ sealed class Game
 				$"""
 				你的性格:{player.personalityPrompts}.
 				你们在玩狼人杀.
-				你以前对局的经验：{player.Memory}.
+				你以前玩{RoleText}角色的攻略:{Memory}.
 				{prompt}(`[名字]`是系统帮添加的,发言内容请不要附带`[{Name}]`,发言尽可能口语化且简短一点.请隐藏身份,随意说谎,表演,同时也不要轻易相信任何人,不要说关于`听到声音`等内容)
 				""";
 			var copied = new List<ChatMessageContent>(context)
@@ -90,7 +91,7 @@ sealed class Game
 			prompt = $"""
 				你的性格:{player.personalityPrompts}.
 				你们在玩狼人杀.
-				你以前对局的经验：{player.Memory}.
+				你以前玩{RoleText}角色的攻略:{Memory}.
 				{prompt}
 				""";
 			const string toolName = "select_target";
@@ -121,7 +122,12 @@ sealed class Game
 			var availableOptions = string.Join("，", options.Select(static r => r.Name)) + "，" + skipOption;
 			prompt = $"你是{Name}({RoleText}),现在选择目标.{prompt}";
 			using(new ConsoleColorScope(ConsoleColor.DarkGray)) Console.WriteLine($"[{Name}]{prompt}[{availableOptions}]");
-			prompt = $"你的性格:{player.personalityPrompts}.\n你记得：{player.Memory}.\n你们在玩狼人杀.\n{prompt}";
+			prompt = $"""
+				你的性格:{player.personalityPrompts}.
+				你以前玩{RoleText}角色的攻略:{Memory}.
+				你们在玩狼人杀.
+				{prompt}
+				""";
 			const string toolName = "select_target_or_skip";
 			Role? target = null;
 			var skipped = false;
@@ -378,10 +384,10 @@ sealed class Game
 		holder.Say("现在公布身份");
 		foreach(var role in roles) holder.Say($"{role.Name}是{role.RoleText}");
 		foreach(var role in roles)
-			role.player.Memory = await role.RawPrompt(
+			role.Memory = await role.RawPrompt(
 				$"""
-				你以前的攻略:{role.player.Memory}
-				现在请你根据本局的情况更新你的攻略。需要抽象一点，不要写具体的内容，例如“回合xxx”，“本局xxx”。字数控制在300字以内.
+				你以前玩{role.RoleText}角色的攻略:{role.Memory}
+				现在请你根据本局的情况更新你{role.RoleText}的攻略。需要抽象一点，不要写具体的内容，例如“回合xxx”，“本局xxx”。字数控制在300字以内.
 				攻略内容将被覆盖，且将在下次进行游戏时指导你的行为。请认真撰写。
 				""");
 		return;
