@@ -1,3 +1,5 @@
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.ChatCompletion;
 using Turandot;
 Console.WriteLine("正在验证api key...");
 var apiKeyPath = Path.Combine(
@@ -21,21 +23,44 @@ Console.ReadKey(true);
 abstract class Player(string name)
 {
 	public readonly string name;
-	public abstract int HandleVote(List<int> roleIds);
+	public abstract int HandleVote(Game.Role me, List<Game.Role> roles);
 	public abstract void HandleReceiveMessage(string message);
 }
 sealed class AiPlayer(string name, (string endpoint, string apiKey, string modelId) credentials): Player(name)
 {
-	readonly List<string> messages = [];
-	public override int HandleVote(List<int> roleIds)
+	readonly List<string> history = [];
+	public override int HandleVote(Game.Role me, List<Game.Role> roles)
 	{
-		LLM.Send(
+		var voteResult = -1;
+		var roleList = string.Join(", ", roles.Select(static r => $"{r.nameAndId}"));
+		var tool = new LLM.ToolSpec(
+			"Vote",
+			"投票淘汰一名玩家",
+			[new("id", "要投票淘汰的玩家id", typeof(int), true),],
+			(args, _) =>
+			{
+				if(args.TryGetValue("id", out var val))
+					voteResult = val switch
+					{
+						int i => i,
+						string s when int.TryParse(s, out var parsed) => parsed,
+						_ => -1,
+					};
+				return Task.FromResult("投票成功");
+			});
+		var messages = new List<ChatMessageContent>
+		{
+			new(AuthorRole.System, $"你是{me.nameAndId},请投票，调用Vote工具完成投票。选择对象：{roleList}"),
+		};
+		messages.AddRange(history.Select(static m => new ChatMessageContent(AuthorRole.User, m)));
+		LLM.Send(credentials, messages, [tool,]);
+		return voteResult;
 	}
-	public override void HandleReceiveMessage(string message) { messages.Add(message); }
+	public override void HandleReceiveMessage(string message) { history.Add(message); }
 }
 sealed class HumanPlayer(string name): Player(name)
 {
-	public override int HandleVote(List<int> roleIds) { throw new NotImplementedException(); }
+	public override int HandleVote(Game.Role me, List<Game.Role> roles) { throw new NotImplementedException(); }
 	public override void HandleReceiveMessage(string message) { throw new NotImplementedException(); }
 }
 sealed class Game
@@ -51,11 +76,11 @@ sealed class Game
 		public readonly int villagerCount = villagerCount;
 		public readonly IReadOnlyList<Player> players = players;
 	}
-	sealed class Role(Game game, Player player, int id, RoleType roleType)
+	public sealed class Role(Game game, Player player, int id, RoleType roleType)
 	{
 		public readonly Player player = player;
 		public readonly int id = id;
-		public readonly string name = $"{player.name}({id})";
+		public readonly string nameAndId = $"{player.name}({id})";
 		public readonly RoleType roleType = roleType;
 		public readonly bool dead = false;
 		public void Say(string message)
@@ -64,8 +89,8 @@ sealed class Game
 				if(role == this)
 					role.HandleReceiveMessage(new($"[我]{message}"));
 				else
-					role.HandleReceiveMessage(new($"[{name}]{message}"));
-			Console.WriteLine($"[{name}]{message}");
+					role.HandleReceiveMessage(new($"[{nameAndId}]{message}"));
+			Console.WriteLine($"[{nameAndId}]{message}");
 		}
 		public void Notify(string message) { HandleReceiveMessage(message); }
 		void HandleReceiveMessage(string message) { player.HandleReceiveMessage(message); }
@@ -73,7 +98,7 @@ sealed class Game
 	static void Notify(Role role, string message)
 	{
 		using var _ = new ConsoleColorScope(ConsoleColor.DarkGray);
-		Console.WriteLine($"[系统->{role.name}]{message}");
+		Console.WriteLine($"[系统->{role.nameAndId}]{message}");
 		role.Notify($"[系统提示(仅你可见)]{message}");
 	}
 	readonly Config config;
@@ -110,7 +135,7 @@ sealed class Game
 				Notify(role, "你睁开了眼睛,你是场上唯一的狼人");
 			else
 			{
-				var names = string.Join(",", GetRoles(RoleType.Wolf).Where(r => r != role).Select(static r => r.name));
+				var names = string.Join(",", GetRoles(RoleType.Wolf).Where(r => r != role).Select(static r => r.nameAndId));
 				Notify(role, $"你睁开了眼睛,你看到{names}也睁开了眼睛");
 			}
 		}
