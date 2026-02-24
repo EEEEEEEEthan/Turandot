@@ -69,10 +69,9 @@ sealed class HumanPlayer(string name): Player(name)
 		{
 			Console.Write($"请投票（{string.Join(", ", roles.Select(static r => r.nameAndId))}）：");
 			var input = (Console.ReadLine() ?? string.Empty).Trim();
-			var match = roles.FirstOrDefault(r =>
-				r.nameAndId.Equals(input, StringComparison.OrdinalIgnoreCase) || r.player.name.Equals(input, StringComparison.OrdinalIgnoreCase) || r.id.ToString() == input);
-			if(match is {}) return match;
-			Console.WriteLine("无效输入，请重新选择。");
+			if(int.TryParse(input, out var id))
+				return roles.FirstOrDefault(r => r.id == id);
+			return null;
 		}
 	}
 	public override void HandleReceiveMessage(string message) { Console.WriteLine(message); }
@@ -105,6 +104,11 @@ sealed class Game
 				else
 					role.HandleReceiveMessage(new($"[{nameAndId}]{message}"));
 			Console.WriteLine($"[{nameAndId}]{message}");
+		}
+		public void HandleVote(List<Role> candidates)
+		{
+			var voteResult = player.HandleVote(this, candidates);
+			Game.Notify(this, voteResult is {}? $"你选择了{voteResult.nameAndId}" : "你选择了弃权");
 		}
 		public void Notify(string message) { HandleReceiveMessage(message); }
 		void HandleReceiveMessage(string message) { player.HandleReceiveMessage(message); }
