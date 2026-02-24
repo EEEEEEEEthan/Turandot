@@ -66,6 +66,13 @@ public static class LLM
 			cancellationToken);
 		return result.Content ?? string.Empty;
 	}
+	public static string Send(
+		(string endpoint, string apiKey, string modelId) credentials,
+		IEnumerable<ChatMessageContent> messages,
+		IEnumerable<ToolSpec>? tools = null,
+		float temperature = 0.7f,
+		CancellationToken cancellationToken = default) =>
+		SendAsync(credentials, messages, tools, temperature, cancellationToken).GetAwaiter().GetResult();
 	public static async Task<(string endpoint, string apiKey, string modelId)> EnsureApiKey(string path)
 	{
 		while(true)
