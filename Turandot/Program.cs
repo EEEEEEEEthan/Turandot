@@ -23,34 +23,37 @@ Console.ReadKey(true);
 abstract class Player(string name)
 {
 	public readonly string name;
-	public abstract int HandleVote(Game.Role me, List<Game.Role> roles);
+	public abstract Game.Role? HandleVote(Game.Role me, List<Game.Role> roles);
 	public abstract void HandleReceiveMessage(string message);
 }
 sealed class AiPlayer(string name, (string endpoint, string apiKey, string modelId) credentials): Player(name)
 {
 	readonly List<string> history = [];
-	public override int HandleVote(Game.Role me, List<Game.Role> roles)
+	public override Game.Role? HandleVote(Game.Role me, List<Game.Role> roles)
 	{
-		var voteResult = -1;
+		Game.Role? voteResult = null;
 		var roleList = string.Join(", ", roles.Select(static r => $"{r.nameAndId}"));
 		var tool = new LLM.ToolSpec(
 			"Vote",
-			"投票淘汰一名玩家",
-			[new("id", "要投票淘汰的玩家id", typeof(int), true),],
+			"进行投票",
+			[new("id", "选择的玩家id", typeof(int), true),],
 			(args, _) =>
 			{
 				if(args.TryGetValue("id", out var val))
-					voteResult = val switch
+				{
+					var id = val switch
 					{
 						int i => i,
 						string s when int.TryParse(s, out var parsed) => parsed,
 						_ => -1,
 					};
+					voteResult = roles.FirstOrDefault(r => r.id == id);
+				}
 				return Task.FromResult("投票成功");
 			});
 		var messages = new List<ChatMessageContent>
 		{
-			new(AuthorRole.System, $"你是{me.nameAndId},请投票，调用Vote工具完成投票。选择对象：{roleList}"),
+			new(AuthorRole.System, $"你是{me.nameAndId},请调用Vote工具完成投票.可选对象:{roleList}"),
 		};
 		messages.AddRange(history.Select(static m => new ChatMessageContent(AuthorRole.User, m)));
 		LLM.Send(credentials, messages, [tool,]);
@@ -60,8 +63,19 @@ sealed class AiPlayer(string name, (string endpoint, string apiKey, string model
 }
 sealed class HumanPlayer(string name): Player(name)
 {
-	public override int HandleVote(Game.Role me, List<Game.Role> roles) { throw new NotImplementedException(); }
-	public override void HandleReceiveMessage(string message) { throw new NotImplementedException(); }
+	public override Game.Role? HandleVote(Game.Role me, List<Game.Role> roles)
+	{
+		while(true)
+		{
+			Console.Write($"请投票（{string.Join(", ", roles.Select(static r => r.nameAndId))}）：");
+			var input = (Console.ReadLine() ?? string.Empty).Trim();
+			var match = roles.FirstOrDefault(r =>
+				r.nameAndId.Equals(input, StringComparison.OrdinalIgnoreCase) || r.player.name.Equals(input, StringComparison.OrdinalIgnoreCase) || r.id.ToString() == input);
+			if(match is {}) return match;
+			Console.WriteLine("无效输入，请重新选择。");
+		}
+	}
+	public override void HandleReceiveMessage(string message) { Console.WriteLine(message); }
 }
 sealed class Game
 {
